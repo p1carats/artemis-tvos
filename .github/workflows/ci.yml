@@ -1,0 +1,36 @@
+name: Build tvOS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-tvos:
+    name: Build Moonlight for tvOS
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout repository with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build Debug release
+        run: |
+          xcodebuild \
+            -project Moonlight.xcodeproj \
+            -scheme "Moonlight TV" \
+            -sdk appletvsimulator \
+            -configuration Debug \
+            clean build
+
+      - name: Build Release release
+        run: |
+          xcodebuild \
+            -project Moonlight.xcodeproj \
+            -scheme "Moonlight TV" \
+            -sdk appletvsimulator \
+            -configuration Release \
+            clean build
