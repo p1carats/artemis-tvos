@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-tvos:
-    name: Build Moonlight for tvOS
+    name: Build Artemis for tvOS
     runs-on: macos-15
 
     steps:
@@ -20,8 +20,8 @@ jobs:
       - name: Build Debug release
         run: |
           xcodebuild \
-            -project Moonlight.xcodeproj \
-            -scheme "Moonlight TV" \
+            -project Artemis.xcodeproj \
+            -scheme "Artemis" \
             -sdk appletvsimulator \
             -configuration Debug \
             clean build
@@ -29,8 +29,8 @@ jobs:
       - name: Build Release release
         run: |
           xcodebuild \
-            -project Moonlight.xcodeproj \
-            -scheme "Moonlight TV" \
+            -project Artemis.xcodeproj \
+            -scheme "Artemis" \
             -sdk appletvsimulator \
             -configuration Release \
             clean build

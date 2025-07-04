@@ -16,7 +16,7 @@
 
 static NSOperationQueue* mainQueue;
 
-static NSString* DB_NAME = @"Moonlight_tvOS.bin";
+static NSString* DB_NAME = @"Artemis_tvOS.bin";
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     return YES;
