@@ -474,29 +474,25 @@
 }
 
 - (void) updatePreferredDisplayMode:(BOOL)streamActive {
-    if (@available(tvOS 11.2, *)) {
-        UIWindow* window = [[[UIApplication sharedApplication] delegate] window];
-        AVDisplayManager* displayManager = [window avDisplayManager];
+    UIWindow* window = [[[UIApplication sharedApplication] delegate] window];
+    if ([window respondsToSelector:@selector(avDisplayManager)]) {
+        AVDisplayManager* displayManager = window.avDisplayManager;
         
         // This logic comes from Kodi and MrMC
         if (streamActive) {
-            int dynamicRange;
-            
-            if (LiGetCurrentHostDisplayHdrMode()) {
-                dynamicRange = 2; // HDR10
-            }
-            else {
-                dynamicRange = 0; // SDR
-            }
+            int dynamicRange = LiGetCurrentHostDisplayHdrMode() ? 2 : 0; // 2 = HDR10, 0 = SDR
             
             AVDisplayCriteria* displayCriteria = [[AVDisplayCriteria alloc] initWithRefreshRate:[_settings.framerate floatValue]
                                                                               videoDynamicRange:dynamicRange];
+            
             displayManager.preferredDisplayCriteria = displayCriteria;
         }
         else {
             // Switch back to the default display mode
             displayManager.preferredDisplayCriteria = nil;
         }
+    } else {
+        Log(LOG_I, @"avDisplayManager is not available on this platform");
     }
 }
 
