@@ -170,25 +170,11 @@ static NSData* p12 = nil;
 }
 
 + (NSData*) readCryptoObject:(NSString*)item {
-#if TARGET_OS_TV
     return [[NSUserDefaults standardUserDefaults] dataForKey:item];
-#else
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString *documentsDirectory = [paths objectAtIndex:0];
-    NSString *file = [documentsDirectory stringByAppendingPathComponent:item];
-    return [NSData dataWithContentsOfFile:file];
-#endif
 }
 
 + (void) writeCryptoObject:(NSString*)item data:(NSData*)data {
-#if TARGET_OS_TV
     [[NSUserDefaults standardUserDefaults] setObject:data forKey:item];
-#else
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString *documentsDirectory = [paths objectAtIndex:0];
-    NSString *file = [documentsDirectory stringByAppendingPathComponent:item];
-    [data writeToFile:file atomically:NO];
-#endif
 }
 
 + (NSData*) readCertFromFile {

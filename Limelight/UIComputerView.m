@@ -19,26 +19,13 @@
 }
 static const float REFRESH_CYCLE = 2.0f;
 
-#if TARGET_OS_TV
 static const int ITEM_PADDING = 50;
 static const int LABEL_DY = 40;
-#else
-static const int ITEM_PADDING = 0;
-static const int LABEL_DY = 20;
-#endif
 
 - (id) init {
     self = [super init];
         
-#if TARGET_OS_TV
     self.frame = CGRectMake(0, 0, 400, 400);
-#else
-    if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
-        self.frame = CGRectMake(0, 0, 200, 200);
-    } else {
-        self.frame = CGRectMake(0, 0, 100, 100);
-    }
-#endif
     
     _hostIcon = [[UIImageView alloc] initWithFrame:self.frame];
     [_hostIcon setImage:[UIImage imageNamed:@"Computer"]];
@@ -62,7 +49,6 @@ static const int LABEL_DY = 20;
     [self addSubview:_hostLabel];
     [self addSubview:_hostIcon];
     
-#if TARGET_OS_TV
     _hostIcon.clipsToBounds = NO;
     _hostIcon.adjustsImageWhenAncestorFocused = YES;
     _hostIcon.masksFocusEffectToContents = YES;
@@ -74,15 +60,6 @@ static const int LABEL_DY = 20;
     
     [_hostIcon.overlayContentView addSubview:_hostOverlay];
     [_hostIcon.overlayContentView addSubview:_hostSpinner];
-#else
-    [self addSubview:_hostOverlay];
-    [self addSubview:_hostSpinner];
-    
-    if (@available(iOS 13.4.1, *)) {
-        // Allow the button style to change when moused over
-        self.pointerInteractionEnabled = YES;
-    }
-#endif
     
     return self;
 }
@@ -119,15 +96,6 @@ static const int LABEL_DY = 20;
     _host = host;
     _callback = callback;
     
-    // Use UIContextMenuInteraction on iOS 13.0+ and a standard UILongPressGestureRecognizer
-    // for tvOS devices and iOS prior to 13.0.
-#if !TARGET_OS_TV
-    if (@available(iOS 13.0, *)) {
-        UIContextMenuInteraction* rightClickInteraction = [[UIContextMenuInteraction alloc] initWithDelegate:self];
-        [self addInteraction:rightClickInteraction];
-    }
-    else
-#endif
     {
         UILongPressGestureRecognizer* longPressRecognizer = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(hostLongClicked:)];
         [self addGestureRecognizer:longPressRecognizer];
@@ -214,19 +182,6 @@ static const int LABEL_DY = 20;
         [_callback hostLongClicked:_host view:self];
     }
 }
-
-#if !TARGET_OS_TV
-- (UIContextMenuConfiguration *)contextMenuInteraction:(UIContextMenuInteraction *)interaction
-                        configurationForMenuAtLocation:(CGPoint)location {
-    // We don't want to trigger the primary action at this point, so cancel
-    // tracking touch on this view now. This will also have the (intended)
-    // effect of removing the touch highlight on this view.
-    [self cancelTrackingWithEvent:nil];
-    
-    [_callback hostLongClicked:_host view:self];
-    return nil;
-}
-#endif
 
 - (void) hostClicked {
     [_callback hostClicked:_host view:self];

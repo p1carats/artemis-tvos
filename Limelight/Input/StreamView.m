@@ -12,14 +12,11 @@
 #import "ControllerSupport.h"
 #import "KeyboardSupport.h"
 #import "RelativeTouchHandler.h"
-#import "AbsoluteTouchHandler.h"
 #import "KeyboardInputField.h"
 
 static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
 
 @implementation StreamView {
-    OnScreenControls* onScreenControls;
-    
     KeyboardInputField* keyInputField;
     BOOL isInputingText;
     NSMutableSet* keysDown;
@@ -62,60 +59,8 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
     [keyInputField setSpellCheckingType:UITextSpellCheckingTypeNo];
     [self addSubview:keyInputField];
     
-#if TARGET_OS_TV
     // tvOS requires RelativeTouchHandler to manage Apple Remote input
     self->touchHandler = [[RelativeTouchHandler alloc] initWithView:self];
-#else
-    // iOS uses RelativeTouchHandler or AbsoluteTouchHandler depending on user preference
-    if (settings.absoluteTouchMode) {
-        self->touchHandler = [[AbsoluteTouchHandler alloc] initWithView:self];
-    }
-    else {
-        self->touchHandler = [[RelativeTouchHandler alloc] initWithView:self];
-    }
-    
-    onScreenControls = [[OnScreenControls alloc] initWithView:self controllerSup:controllerSupport streamConfig:streamConfig];
-    OnScreenControlsLevel level = (OnScreenControlsLevel)[settings.onscreenControls integerValue];
-    if (settings.absoluteTouchMode) {
-        Log(LOG_I, @"On-screen controls disabled in absolute touch mode");
-        [onScreenControls setLevel:OnScreenControlsLevelOff];
-    }
-    else if (level == OnScreenControlsLevelAuto) {
-        [controllerSupport initAutoOnScreenControlMode:onScreenControls];
-    }
-    else {
-        Log(LOG_I, @"Setting manual on-screen controls level: %d", (int)level);
-        [onScreenControls setLevel:level];
-    }
-    
-    // It would be nice to just use GCMouse on iOS 14+ and the older API on iOS 13
-    // but unfortunately that isn't possible today. GCMouse doesn't recognize many
-    // mice correctly, but UIKit does. We will register for both and ignore UIKit
-    // events if a GCMouse is connected.
-    if (@available(iOS 13.4, *)) {
-        [self addInteraction:[[UIPointerInteraction alloc] initWithDelegate:self]];
-        
-        UIPanGestureRecognizer *discreteMouseWheelRecognizer = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(mouseWheelMovedDiscrete:)];
-        discreteMouseWheelRecognizer.maximumNumberOfTouches = 0;
-        discreteMouseWheelRecognizer.allowedScrollTypesMask = UIScrollTypeMaskDiscrete;
-        discreteMouseWheelRecognizer.allowedTouchTypes = @[@(UITouchTypeIndirectPointer)];
-        [self addGestureRecognizer:discreteMouseWheelRecognizer];
-        
-        UIPanGestureRecognizer *continuousMouseWheelRecognizer = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(mouseWheelMovedContinuous:)];
-        continuousMouseWheelRecognizer.maximumNumberOfTouches = 0;
-        continuousMouseWheelRecognizer.allowedScrollTypesMask = UIScrollTypeMaskContinuous;
-        continuousMouseWheelRecognizer.allowedTouchTypes = @[@(UITouchTypeIndirectPointer)];
-        [self addGestureRecognizer:continuousMouseWheelRecognizer];
-    }
-    
-#if defined(__IPHONE_16_1) || defined(__TVOS_16_1)
-    if (@available(iOS 16.1, *)) {
-        UIHoverGestureRecognizer *stylusHoverRecognizer = [[UIHoverGestureRecognizer alloc] initWithTarget:self action:@selector(sendStylusHoverEvent:)];
-        stylusHoverRecognizer.allowedTouchTypes = @[@(UITouchTypePencil)];
-        [self addGestureRecognizer:stylusHoverRecognizer];
-    }
-#endif
-#endif
     
     x1mouse = [[X1Mouse alloc] init];
     x1mouse.delegate = self;
@@ -158,21 +103,6 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
     else {
         // User is still touching the screen. Restart the timer.
         [self startInteractionTimer];
-    }
-}
-
-- (void) showOnScreenControls {
-#if !TARGET_OS_TV
-    [onScreenControls show];
-#endif
-}
-
-- (OnScreenControlsLevel) getCurrentOscState {
-    if (onScreenControls == nil) {
-        return OnScreenControlsLevelOff;
-    }
-    else {
-        return [onScreenControls getLevel];
     }
 }
 
@@ -219,105 +149,6 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
                        MIN(MAX(y, videoOrigin.y), videoOrigin.y + videoSize.height) - videoOrigin.y);
 }
 
-#if !TARGET_OS_TV
-
-- (uint16_t)getRotationFromAzimuthAngle:(float)azimuthAngle {
-    // iOS reports azimuth of 0 when the stylus is pointing west, but Moonlight expects
-    // rotation of 0 to mean the stylus is pointing north. Rotate the azimuth angle
-    // clockwise by 90 degrees to convert from iOS to Moonlight rotation conventions.
-    int32_t rotationAngle = (azimuthAngle - M_PI_2) * (180.f / M_PI);
-    if (rotationAngle < 0) {
-        rotationAngle += 360;
-    }
-    return (uint16_t)rotationAngle;
-}
-
-- (uint8_t)getTiltFromAltitudeAngle:(float)altitudeAngle {
-    // iOS reports an altitude of 0 when the stylus is parallel to the touch surface,
-    // while Moonlight expects a tilt of 0 when the stylus is perpendicular to the surface.
-    // Subtract the tilt angle from 90 to convert from iOS to Moonlight tilt conventions.
-    uint8_t altitudeDegs = abs((int16_t)(altitudeAngle * (180.f / M_PI)));
-    return 90 - MIN(90, altitudeDegs);
-}
-
-- (BOOL)sendStylusEvent:(UITouch*)event {
-    uint8_t type;
-    
-    // Don't touch stylus events if the host doesn't support them. We want to pass
-    // them as normal touches for legacy hosts that don't understand pen events.
-    if (!(LiGetHostFeatureFlags() & LI_FF_PEN_TOUCH_EVENTS)) {
-        return NO;
-    }
-    
-    switch (event.phase) {
-        case UITouchPhaseBegan:
-            type = LI_TOUCH_EVENT_DOWN;
-            break;
-        case UITouchPhaseMoved:
-            type = LI_TOUCH_EVENT_MOVE;
-            break;
-        case UITouchPhaseEnded:
-            type = LI_TOUCH_EVENT_UP;
-            break;
-        case UITouchPhaseCancelled:
-            type = LI_TOUCH_EVENT_CANCEL;
-            break;
-        default:
-            return YES;
-    }
-
-    CGPoint location = [self adjustCoordinatesForVideoArea:[event locationInView:self]];
-    CGSize videoSize = [self getVideoAreaSize];
-    
-    return LiSendPenEvent(type, LI_TOOL_TYPE_PEN, 0, location.x / videoSize.width, location.y / videoSize.height,
-                          (event.force / event.maximumPossibleForce) / sin(event.altitudeAngle),
-                          0.0f, 0.0f,
-                          [self getRotationFromAzimuthAngle:[event azimuthAngleInView:self]],
-                          [self getTiltFromAltitudeAngle:event.altitudeAngle]) != LI_ERR_UNSUPPORTED;
-}
-
-- (void)sendStylusHoverEvent:(UIHoverGestureRecognizer*)gesture API_AVAILABLE(ios(13.0)) {
-    uint8_t type;
-    
-    switch (gesture.state) {
-        case UIGestureRecognizerStateBegan:
-        case UIGestureRecognizerStateChanged:
-            type = LI_TOUCH_EVENT_HOVER;
-            break;
-
-        case UIGestureRecognizerStateEnded:
-            type = LI_TOUCH_EVENT_HOVER_LEAVE;
-            break;
-
-        default:
-            return;
-    }
-
-    CGPoint location = [self adjustCoordinatesForVideoArea:[gesture locationInView:self]];
-    CGSize videoSize = [self getVideoAreaSize];
-    
-    float distance = 0.0f;
-#if defined(__IPHONE_16_1) || defined(__TVOS_16_1)
-    if (@available(iOS 16.1, *)) {
-        distance = gesture.zOffset;
-    }
-#endif
-    
-    uint16_t rotationAngle = LI_ROT_UNKNOWN;
-    uint8_t tiltAngle = LI_TILT_UNKNOWN;
-#if defined(__IPHONE_16_4) || defined(__TVOS_16_4)
-    if (@available(iOS 16.4, *)) {
-        rotationAngle = [self getRotationFromAzimuthAngle:[gesture azimuthAngleInView:self]];
-        tiltAngle = [self getTiltFromAltitudeAngle:gesture.altitudeAngle];
-    }
-#endif
-    
-    LiSendPenEvent(type, LI_TOOL_TYPE_PEN, 0, location.x / videoSize.width, location.y / videoSize.height,
-                   distance, 0.0f, 0.0f, rotationAngle, tiltAngle);
-}
-
-#endif
-
 - (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event {
     if ([self handleMouseButtonEvent:BUTTON_ACTION_PRESS
                           forTouches:touches
@@ -330,81 +161,6 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
     
     // Notify of user interaction and start expiration timer
     [self startInteractionTimer];
-    
-#if !TARGET_OS_TV
-    if (@available(iOS 13.4, *)) {
-        for (UITouch* touch in touches) {
-            if (touch.type == UITouchTypePencil) {
-                if ([self sendStylusEvent:touch]) {
-                    return;
-                }
-            }
-        }
-    }
-#endif
-    
-    if (![onScreenControls handleTouchDownEvent:touches]) {
-        // We still inform the touch handler even if we're going trigger the
-        // keyboard activation gesture. This is important to ensure the touch
-        // handler has a consistent view of touch events to correctly suppress
-        // activation of one or two finger gestures when a three finger gesture
-        // is triggered.
-        [touchHandler touchesBegan:touches withEvent:event];
-        
-        if ([[event allTouches] count] == 3) {
-            if (isInputingText) {
-                Log(LOG_D, @"Closing the keyboard");
-                [keyInputField resignFirstResponder];
-                isInputingText = false;
-            } else {
-                Log(LOG_D, @"Opening the keyboard");
-                // Prepare the textbox used to capture keyboard events.
-                keyInputField.delegate = self;
-                keyInputField.text = @"0";
-#if !TARGET_OS_TV
-                // Prepare the toolbar above the keyboard for more options
-                UIToolbar *customToolbarView = [[UIToolbar alloc] initWithFrame:CGRectMake(0, 0, self.bounds.size.width, 44)];
-                
-                UIBarButtonItem *doneBarButton = [self createButtonWithImageNamed:@"DoneIcon.png" backgroundColor:[UIColor clearColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0x00 isToggleable:NO];
-                UIBarButtonItem *windowsBarButton = [self createButtonWithImageNamed:@"WindowsIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0x5B isToggleable:YES];
-                UIBarButtonItem *tabBarButton = [self createButtonWithImageNamed:@"TabIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0x09 isToggleable:NO];
-                UIBarButtonItem *shiftBarButton = [self createButtonWithImageNamed:@"ShiftIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0xA0 isToggleable:YES];
-                UIBarButtonItem *escapeBarButton = [self createButtonWithImageNamed:@"EscapeIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0x1B isToggleable:NO];
-                UIBarButtonItem *controlBarButton = [self createButtonWithImageNamed:@"ControlIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0xA2 isToggleable:YES];
-                UIBarButtonItem *altBarButton = [self createButtonWithImageNamed:@"AltIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0xA4 isToggleable:YES];
-                UIBarButtonItem *deleteBarButton = [self createButtonWithImageNamed:@"DeleteIcon.png" backgroundColor:[UIColor blackColor] target:self action:@selector(toolbarButtonClicked:) keyCode:0x2E isToggleable:NO];
-                UIBarButtonItem *flexibleSpace = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
-                
-                [customToolbarView setItems:[NSArray arrayWithObjects:doneBarButton, windowsBarButton, escapeBarButton, tabBarButton, shiftBarButton, controlBarButton, altBarButton, deleteBarButton, flexibleSpace, nil]];
-                keyInputField.inputAccessoryView = customToolbarView;
-#endif
-                [keyInputField becomeFirstResponder];
-                [keyInputField addTarget:self action:@selector(onKeyboardPressed:) forControlEvents:UIControlEventEditingChanged];
-                
-                // Undo causes issues for our state management, so turn it off
-                [keyInputField.undoManager disableUndoRegistration];
-                
-                isInputingText = true;
-            }
-        }
-    }
-}
-
-- (UIBarButtonItem *)createButtonWithImageNamed:(NSString *)imageName backgroundColor:(UIColor *)backgroundColor target:(id)target action:(SEL)action keyCode:(NSInteger)keyCode isToggleable:(BOOL)isToggleable {
-    UIImage *image = [UIImage imageNamed:imageName];
-    UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
-    [button setImage:image forState:UIControlStateNormal];
-    button.frame = CGRectMake(0, 0, 30, 30);
-    button.imageView.contentMode = UIViewContentModeScaleAspectFit;
-    button.imageView.backgroundColor = backgroundColor;
-    button.imageView.layer.cornerRadius = 10.0;
-    button.imageEdgeInsets = UIEdgeInsetsMake(6, 6, 6, 6);
-    [button addTarget:target action:action forControlEvents:UIControlEventTouchUpInside];
-    objc_setAssociatedObject(button, "keyCode", @(keyCode), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject(button, "isToggleable", @(isToggleable), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject(button, "isOn", @(NO), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    UIBarButtonItem *barButton = [[UIBarButtonItem alloc] initWithCustomView:button];
-    return barButton;
 }
 
 - (void)toolbarButtonClicked:(UIButton *)sender {
@@ -448,103 +204,11 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
 }
 
 - (BOOL)handleMouseButtonEvent:(int)buttonAction forTouches:(NSSet *)touches withEvent:(UIEvent *)event {
-#if !TARGET_OS_TV
-    if (@available(iOS 13.4, *)) {
-        UITouch* touch = [touches anyObject];
-        if (touch.type == UITouchTypeIndirectPointer) {
-            if (@available(iOS 14.0, *)) {
-                if ([GCMouse current] != nil) {
-                    // We'll handle this with GCMouse. Do nothing here.
-                    return YES;
-                }
-            }
-            
-            UIEventButtonMask normalizedButtonMask;
-            
-            // iOS 14 includes the released button in the buttonMask for the release
-            // event, while iOS 13 does not. Normalize that behavior here.
-            if (@available(iOS 14.0, *)) {
-                if (buttonAction == BUTTON_ACTION_RELEASE) {
-                    normalizedButtonMask = lastMouseButtonMask & ~event.buttonMask;
-                }
-                else {
-                    normalizedButtonMask = event.buttonMask;
-                }
-            }
-            else {
-                normalizedButtonMask = event.buttonMask;
-            }
-            
-            UIEventButtonMask changedButtons = lastMouseButtonMask ^ normalizedButtonMask;
-                        
-            for (int i = BUTTON_LEFT; i <= BUTTON_X2; i++) {
-                UIEventButtonMask buttonFlag;
-                
-                switch (i) {
-                    // Right and Middle are reversed from what iOS uses
-                    case BUTTON_RIGHT:
-                        buttonFlag = UIEventButtonMaskForButtonNumber(2);
-                        break;
-                    case BUTTON_MIDDLE:
-                        buttonFlag = UIEventButtonMaskForButtonNumber(3);
-                        break;
-                        
-                    default:
-                        buttonFlag = UIEventButtonMaskForButtonNumber(i);
-                        break;
-                }
-                
-                if (changedButtons & buttonFlag) {
-                    LiSendMouseButtonEvent(buttonAction, i);
-                }
-            }
-            
-            lastMouseButtonMask = normalizedButtonMask;
-            return YES;
-        }
-    }
-#endif
-    
     return NO;
 }
 
 - (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event {
-#if !TARGET_OS_TV
-    if (@available(iOS 13.4, *)) {
-        for (UITouch* touch in touches) {
-            if (touch.type == UITouchTypePencil) {
-                if ([self sendStylusEvent:touch]) {
-                    return;
-                }
-            }
-        }
-        
-        UITouch *touch = [touches anyObject];
-        if (touch.type == UITouchTypeIndirectPointer) {
-            if (@available(iOS 14.0, *)) {
-                if ([GCMouse current] != nil) {
-                    // We'll handle this with GCMouse. Do nothing here.
-                    return;
-                }
-            }
-            
-            // We must handle this event to properly support
-            // drags while the middle, X1, or X2 mouse buttons are
-            // held down. For some reason, left and right buttons
-            // don't require this, but we do it anyway for them too.
-            // Cursor movement without a button held down is handled
-            // in pointerInteraction:regionForRequest:defaultRegion.
-            [self updateCursorLocation:[touch locationInView:self] isMouse:YES];
-            return;
-        }
-    }
-#endif
-    
     hasUserInteracted = YES;
-    
-    if (![onScreenControls handleTouchMovedEvent:touches]) {
-        [touchHandler touchesMoved:touches withEvent:event];
-    }
 }
 
 - (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
@@ -594,24 +258,7 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
     }
     
     Log(LOG_D, @"Touch up");
-    
     hasUserInteracted = YES;
-    
-#if !TARGET_OS_TV
-    if (@available(iOS 13.4, *)) {
-        for (UITouch* touch in touches) {
-            if (touch.type == UITouchTypePencil) {
-                if ([self sendStylusEvent:touch]) {
-                    return;
-                }
-            }
-        }
-    }
-#endif
-    
-    if (![onScreenControls handleTouchUpEvent:touches]) {
-        [touchHandler touchesEnded:touches withEvent:event];
-    }
 }
 
 - (void)touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event {
@@ -619,156 +266,6 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
     [self handleMouseButtonEvent:BUTTON_ACTION_RELEASE
                       forTouches:touches
                        withEvent:event];
-#if !TARGET_OS_TV
-    if (@available(iOS 13.4, *)) {
-        for (UITouch* touch in touches) {
-            if (touch.type == UITouchTypePencil) {
-                [self sendStylusEvent:touch];
-            }
-        }
-    }
-#endif
-}
-
-#if !TARGET_OS_TV
-- (void) updateCursorLocation:(CGPoint)location isMouse:(BOOL)isMouse {
-    CGPoint normalizedLocation = [self adjustCoordinatesForVideoArea:location];
-    CGSize videoSize = [self getVideoAreaSize];
-    
-    // Send the mouse position relative to the video region if it has changed
-    // if we're receiving coordinates from a real mouse.
-    //
-    // NB: It is important for functionality (not just optimization) to only
-    // send it if the value has changed. We will receive one of these events
-    // any time the user presses a modifier key, which can result in errant
-    // mouse motion when using a Citrix X1 mouse.
-    if (normalizedLocation.x != lastMouseX || normalizedLocation.y != lastMouseY || !isMouse) {
-        if (lastMouseX != 0 || lastMouseY != 0 || !isMouse) {
-            LiSendMousePositionEvent(normalizedLocation.x, normalizedLocation.y, videoSize.width, videoSize.height);
-        }
-        
-        if (isMouse) {
-            lastMouseX = normalizedLocation.x;
-            lastMouseY = normalizedLocation.y;
-        }
-    }
-}
-
-- (UIPointerRegion *)pointerInteraction:(UIPointerInteraction *)interaction
-                       regionForRequest:(UIPointerRegionRequest *)request
-                          defaultRegion:(UIPointerRegion *)defaultRegion API_AVAILABLE(ios(13.4)) {
-    if (@available(iOS 14.0, *)) {
-        if ([GCMouse current] != nil) {
-            // We'll handle this with GCMouse. Do nothing here.
-            return nil;
-        }
-    }
-    
-    // This logic mimics what iOS does with AVLayerVideoGravityResizeAspect
-    CGSize videoSize;
-    CGPoint videoOrigin;
-    if (self.bounds.size.width > self.bounds.size.height * streamAspectRatio) {
-        videoSize = CGSizeMake(self.bounds.size.height * streamAspectRatio, self.bounds.size.height);
-    } else {
-        videoSize = CGSizeMake(self.bounds.size.width, self.bounds.size.width / streamAspectRatio);
-    }
-    videoOrigin = CGPointMake(self.bounds.size.width / 2 - videoSize.width / 2,
-                              self.bounds.size.height / 2 - videoSize.height / 2);
-    
-    // Move the cursor on the host if no buttons are pressed.
-    // Motion with buttons pressed in handled in touchesMoved:
-    if (lastMouseButtonMask == 0) {
-        [self updateCursorLocation:request.location isMouse:YES];
-    }
-    
-    // The pointer interaction should cover the video region only
-    return [UIPointerRegion regionWithRect:CGRectMake(videoOrigin.x, videoOrigin.y, videoSize.width, videoSize.height) identifier:nil];
-}
-
-- (UIPointerStyle *)pointerInteraction:(UIPointerInteraction *)interaction styleForRegion:(UIPointerRegion *)region  API_AVAILABLE(ios(13.4)) {
-    // Always hide the mouse cursor over our stream view
-    return [UIPointerStyle hiddenPointerStyle];
-}
-
-- (void)mouseWheelMovedContinuous:(UIPanGestureRecognizer *)gesture {
-    switch (gesture.state) {
-        case UIGestureRecognizerStateBegan:
-        case UIGestureRecognizerStateChanged:
-            break;
-        
-        case UIGestureRecognizerStateEnded:
-        default:
-            // Ignore recognition failure and other states
-            lastScrollTranslation = CGPointMake(0, 0);
-            return;
-    }
-    
-    CGPoint currentScrollTranslation = [gesture translationInView:self];
-    const short translationMultiplier = 120 * 20; // WHEEL_DELTA * 20
-    
-    {
-        short translationDeltaY = ((currentScrollTranslation.y - lastScrollTranslation.y) / self.bounds.size.height) * translationMultiplier;
-        if (translationDeltaY != 0) {
-            LiSendHighResScrollEvent(translationDeltaY);
-            lastScrollTranslation = currentScrollTranslation;
-        }
-    }
-
-    {
-        short translationDeltaX = ((currentScrollTranslation.x - lastScrollTranslation.x) / self.bounds.size.width) * translationMultiplier;
-        if (translationDeltaX != 0) {
-            // Direction is reversed from vertical scrolling
-            LiSendHighResHScrollEvent(-translationDeltaX);
-            lastScrollTranslation = currentScrollTranslation;
-        }
-    }
-}
-
-- (void)mouseWheelMovedDiscrete:(UIPanGestureRecognizer *)gesture {
-    switch (gesture.state) {
-        case UIGestureRecognizerStateBegan:
-        case UIGestureRecognizerStateChanged:
-            break;
-        
-        case UIGestureRecognizerStateEnded:
-        default:
-            // Ignore recognition failure and other states
-            lastScrollTranslation = CGPointMake(0, 0);
-            return;
-    }
-    
-    // Using velocityInView is 0 for discrete scroll events
-    // when scrolling very slowly, but translationInView does work.
-    CGPoint currentScrollTranslation = [gesture translationInView:self];
-    
-    {
-        short translationDeltaY = currentScrollTranslation.y - lastScrollTranslation.y;
-        if (translationDeltaY != 0) {
-            LiSendScrollEvent(translationDeltaY > 0 ? 1 : -1);
-        }
-    }
-
-    {
-        short translationDeltaX = currentScrollTranslation.x - lastScrollTranslation.x;
-        if (translationDeltaX != 0) {
-            // Direction is reversed from vertical scrolling
-            LiSendHScrollEvent(translationDeltaX < 0 ? 1 : -1);
-        }
-    }
-    
-    lastScrollTranslation = currentScrollTranslation;
-}
-
-#endif
-
-- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer {
-    if (@available(iOS 13.0, *)) {
-        // Disable the 3 finger tap gestures that trigger the copy/paste/undo toolbar on iOS 13+
-        return gestureRecognizer.name == nil || ![gestureRecognizer.name hasPrefix:@"kbProductivity."];
-    }
-    else {
-        return YES;
-    }
 }
 
 - (BOOL)textFieldShouldReturn:(UITextField *)textField {
@@ -948,11 +445,5 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
 - (void)wheelDidScrollWithIdentifier:(NSUUID * _Nonnull)identifier deltaZ:(int8_t)deltaZ {
     LiSendScrollEvent(deltaZ);
 }
-
-#if !TARGET_OS_TV
-- (BOOL)isMultipleTouchEnabled {
-    return YES;
-}
-#endif
 
 @end

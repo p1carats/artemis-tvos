@@ -64,19 +64,7 @@ NSString *const deviceName = @"roth";
     return NO;
 }
 
-#if !TARGET_OS_TV
-+ (void) launchUrl:(NSString*)urlString {
-    [[UIApplication sharedApplication] openURL:[NSURL URLWithString:urlString] options:@{} completionHandler:nil];
-}
-#endif
-
 + (void) addHelpOptionToDialog:(UIAlertController*)dialog {
-#if !TARGET_OS_TV
-    // tvOS doesn't have a browser
-    [dialog addAction:[UIAlertAction actionWithTitle:@"Help" style:UIAlertActionStyleDefault handler:^(UIAlertAction* action){
-        [Utils launchUrl:@"https://github.com/moonlight-stream/moonlight-docs/wiki/Troubleshooting"];
-    }]];
-#endif
 }
 
 + (BOOL) parseAddressPortString:(NSString*)addressPort address:(NSRange*)address port:(NSRange*)port {

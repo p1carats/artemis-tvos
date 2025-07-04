@@ -34,11 +34,7 @@ static UIImage* noImage;
         noImage = [UIImage imageNamed:@"NoAppImage"];
     }
         
-#if TARGET_OS_TV
     self.frame = CGRectMake(0, 0, 200, 265);
-#else
-    self.frame = CGRectMake(0, 0, 150, 200);
-#endif
     
     [self setAlpha:app.hidden ? 0.4 : 1.0];
     
@@ -46,15 +42,6 @@ static UIImage* noImage;
     [_appImage setImage:noImage];
     [self addSubview:_appImage];
     
-    // Use UIContextMenuInteraction on iOS 13.0+ and a standard UILongPressGestureRecognizer
-    // for tvOS devices and iOS prior to 13.0.
-#if !TARGET_OS_TV
-    if (@available(iOS 13.0, *)) {
-        UIContextMenuInteraction* rightClickInteraction = [[UIContextMenuInteraction alloc] initWithDelegate:self];
-        [self addInteraction:rightClickInteraction];
-    }
-    else
-#endif
     {
         UILongPressGestureRecognizer* longPressRecognizer = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(appLongClicked:)];
         [self addGestureRecognizer:longPressRecognizer];
@@ -65,20 +52,7 @@ static UIImage* noImage;
     [self addTarget:self action:@selector(buttonSelected:) forControlEvents:UIControlEventTouchDown];
     [self addTarget:self action:@selector(buttonDeselected:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchCancel | UIControlEventTouchDragExit];
     
-#if TARGET_OS_TV
     _appImage.adjustsImageWhenAncestorFocused = YES;
-#else
-    // Rasterizing the cell layer increases rendering performance by quite a bit
-    // but we want it unrasterized for tvOS where it must be scaled.
-    self.layer.shouldRasterize = YES;
-    self.layer.rasterizationScale = [UIScreen mainScreen].scale;
-    
-    if (@available(iOS 13.4.1, *)) {
-        // Allow the button style to change when moused over
-        self.pointerInteractionEnabled = YES;
-    }
-#endif
-    
     [self updateAppImage];
     
     return self;
@@ -100,19 +74,6 @@ static UIImage* noImage;
         [_callback appLongClicked:_app view:self];
     }
 }
-
-#if !TARGET_OS_TV
-- (UIContextMenuConfiguration *)contextMenuInteraction:(UIContextMenuInteraction *)interaction
-                        configurationForMenuAtLocation:(CGPoint)location {
-    // We don't want to trigger the primary action at this point, so cancel
-    // tracking touch on this view now. This will also have the (intended)
-    // effect of removing the touch highlight on this view.
-    [self cancelTrackingWithEvent:nil];
-    
-    [_callback appLongClicked:_app view:self];
-    return nil;
-}
-#endif
 
 - (void) updateAppImage {
     if (_appOverlay != nil) {
@@ -172,13 +133,8 @@ static UIImage* noImage;
     
     [self positionSubviews];
     
-#if TARGET_OS_TV
     [_appImage.overlayContentView addSubview:_appLabel];
     [_appImage.overlayContentView addSubview:_appOverlay];
-#else
-    [self addSubview:_appLabel];
-    [self addSubview:_appOverlay];
-#endif
 }
 
 - (void) buttonSelected:(id)sender {

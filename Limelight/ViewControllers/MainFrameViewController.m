@@ -27,11 +27,7 @@
 #import "IdManager.h"
 #import "ConnectionHelper.h"
 
-#if !TARGET_OS_TV
-#import "SettingsViewController.h"
-#else
 #import <sys/utsname.h>
-#endif
 
 #import <VideoToolbox/VideoToolbox.h>
 
@@ -49,13 +45,10 @@
     UIAlertController* _pairAlert;
     LoadingFrameViewController* _loadingFrame;
     UIScrollView* hostScrollView;
-    FrontViewPosition currentPosition;
     NSArray* _sortedAppList;
     NSCache* _boxArtCache;
     bool _background;
-#if TARGET_OS_TV
     UITapGestureRecognizer* _menuRecognizer;
-#endif
 }
 static NSMutableSet* hostList;
 
@@ -114,18 +107,6 @@ static NSMutableSet* hostList;
         [self->_discMan startDiscovery];
         [self alreadyPaired];
     });
-}
-
-- (void)disableUpButton {
-#if !TARGET_OS_TV
-    [self->_upButton setTitle:nil];
-#endif
-}
-
-- (void)enableUpButton {
-#if !TARGET_OS_TV
-    [self->_upButton setTitle:@"Select New Host"];
-#endif
 }
 
 - (void)updateTitle {
@@ -288,11 +269,9 @@ static NSMutableSet* hostList;
 }
 
 - (void)showHostSelectionView {
-#if TARGET_OS_TV
     // Remove the menu button intercept to allow the app to exit
     // when at the host selection view.
     [self.navigationController.view removeGestureRecognizer:_menuRecognizer];
-#endif
     
     [_appManager stopRetrieving];
     _showHiddenApps = NO;
@@ -300,7 +279,6 @@ static NSMutableSet* hostList;
     _sortedAppList = nil;
     
     [self updateTitle];
-    [self disableUpButton];
     
     [self.collectionView reloadData];
     [self.view addSubview:hostScrollView];
@@ -338,13 +316,10 @@ static NSMutableSet* hostList;
     Log(LOG_D, @"Clicked host: %@", host.name);
     _selectedHost = host;
     [self updateTitle];
-    [self enableUpButton];
     [self disableNavigation];
     
-#if TARGET_OS_TV
     // Intercept the menu key to go back to the host page
     [self.navigationController.view addGestureRecognizer:_menuRecognizer];
-#endif
     
     // If we are online, paired, and have a cached app list, skip straight
     // to the app grid without a loading frame. This is the fast path that users
@@ -492,15 +467,8 @@ static NSMutableSet* hostList;
             self->_showHiddenApps = YES;
             [self hostClicked:host view:view];
         }]];
-        
-#if !TARGET_OS_TV
-        if (host.isNvidiaServerSoftware) {
-            [longClickAlert addAction:[UIAlertAction actionWithTitle:@"NVIDIA GameStream End-of-Service" style:UIAlertActionStyleDefault handler:^(UIAlertAction* action){
-                [Utils launchUrl:@"https://github.com/moonlight-stream/moonlight-docs/wiki/NVIDIA-GameStream-End-Of-Service-Announcement-FAQ"];
-            }]];
-        }
-#endif
     }
+    
     [longClickAlert addAction:[UIAlertAction actionWithTitle:@"Test Network" style:UIAlertActionStyleDefault handler:^(UIAlertAction* action) {
         [self showLoadingFrame:^{
             dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -530,16 +498,7 @@ static NSMutableSet* hostList;
             });
         }];
     }]];
-#if !TARGET_OS_TV
-    if (host.state != StateOnline) {
-        [longClickAlert addAction:[UIAlertAction actionWithTitle:@"NVIDIA GameStream End-of-Service" style:UIAlertActionStyleDefault handler:^(UIAlertAction* action){
-            [Utils launchUrl:@"https://github.com/moonlight-stream/moonlight-docs/wiki/NVIDIA-GameStream-End-Of-Service-Announcement-FAQ"];
-        }]];
-        [longClickAlert addAction:[UIAlertAction actionWithTitle:@"Connection Help" style:UIAlertActionStyleDefault handler:^(UIAlertAction* action){
-            [Utils launchUrl:@"https://github.com/moonlight-stream/moonlight-docs/wiki/Troubleshooting"];
-        }]];
-    }
-#endif
+
     [longClickAlert addAction:[UIAlertAction actionWithTitle:@"Remove Host" style:UIAlertActionStyleDestructive handler:^(UIAlertAction* action) {
         [self->_discMan removeHostFromDiscovery:host];
         DataManager* dataMan = [[DataManager alloc] init];
@@ -623,7 +582,7 @@ static NSMutableSet* hostList;
     
     _streamConfig.height = [streamSettings.height intValue];
     _streamConfig.width = [streamSettings.width intValue];
-#if TARGET_OS_TV
+
     // Don't allow streaming 4K on the Apple TV HD
     struct utsname systemInfo;
     uname(&systemInfo);
@@ -632,7 +591,6 @@ static NSMutableSet* hostList;
         _streamConfig.width = 1920;
         _streamConfig.height = 1080;
     }
-#endif
     
     _streamConfig.bitRate = [streamSettings.bitrate intValue];
     _streamConfig.optimizeGameSettings = streamSettings.optimizeGames;
@@ -664,7 +622,7 @@ static NSMutableSet* hostList;
     
     switch (streamSettings.preferredCodec) {
         case CODEC_PREF_AV1:
-#if defined(__IPHONE_16_0) || defined(__TVOS_16_0)
+#if defined(__TVOS_16_0)
             if (VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1)) {
                 _streamConfig.supportedVideoFormats |= VIDEO_FORMAT_AV1_MAIN8;
             }
@@ -693,7 +651,7 @@ static NSMutableSet* hostList;
         }
     }
     
-#if defined(__IPHONE_16_0) || defined(__TVOS_16_0)
+#if defined(__TVOS_16_0)
     // Add the AV1 Main10 format if AV1 and HDR are both enabled and supported
     if ((_streamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_AV1) && streamSettings.enableHdr &&
         VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1) && (AVPlayer.availableHDRModes & AVPlayerHDRModeHDR10) != 0) {
@@ -706,15 +664,6 @@ static NSMutableSet* hostList;
     Log(LOG_D, @"Long clicked app: %@", app.name);
     
     [_appManager stopRetrieving];
-    
-#if !TARGET_OS_TV
-    if (currentPosition != FrontViewPositionLeft) {
-        // This must not be animated because we need the position
-        // to change (and notify our callback to save settings data)
-        // before we call prepareToStreamApp.
-        [[self revealViewController] revealToggleAnimated:NO];
-    }
-#endif
 
     TemporaryApp* currentApp = [self findRunningApp:app.host];
     
@@ -843,15 +792,6 @@ static NSMutableSet* hostList;
     
     [_appManager stopRetrieving];
     
-#if !TARGET_OS_TV
-    if (currentPosition != FrontViewPositionLeft) {
-        // This must not be animated because we need the position
-        // to change (and notify our callback to save settings data)
-        // before we call prepareToStreamApp.
-        [[self revealViewController] revealToggleAnimated:NO];
-    }
-#endif
-    
     if ([self findRunningApp:app.host]) {
         // If there's a running app, display a menu
         [self appLongClicked:app view:view];
@@ -870,22 +810,9 @@ static NSMutableSet* hostList;
     return nil;
 }
 
-#if !TARGET_OS_TV
-- (void)revealController:(SWRevealViewController *)revealController didMoveToPosition:(FrontViewPosition)position {
-    // If we moved back to the center position, we should save the settings
-    if (position == FrontViewPositionLeft) {
-        [(SettingsViewController*)[revealController rearViewController] saveSettings];
-    }
-    
-    currentPosition = position;
-}
-#endif
-
-#if TARGET_OS_TV
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath {
     [self appClicked:_sortedAppList[indexPath.row] view:nil];
 }
-#endif
 
 - (void)prepareForSegue:(UIStoryboardSegue *)segue sender:(id)sender {
     if ([segue.destinationViewController isKindOfClass:[StreamFrameViewController class]]) {
@@ -903,46 +830,10 @@ static NSMutableSet* hostList;
     [_loadingFrame dismissLoadingFrame:completion];
 }
 
-- (void)adjustScrollViewForSafeArea:(UIScrollView*)view {
-    if (@available(iOS 11.0, *)) {
-        if (self.view.safeAreaInsets.left >= 20 || self.view.safeAreaInsets.right >= 20) {
-            view.contentInset = UIEdgeInsetsMake(0, 20, 0, 20);
-        }
-    }
-}
-
-// Adjust the subviews for the safe area on the iPhone X.
-- (void)viewSafeAreaInsetsDidChange {
-    [super viewSafeAreaInsetsDidChange];
-    
-    [self adjustScrollViewForSafeArea:self.collectionView];
-    [self adjustScrollViewForSafeArea:self->hostScrollView];
-}
-
 - (void)viewDidLoad
 {
     [super viewDidLoad];
         
-#if !TARGET_OS_TV
-    // Set the side bar button action. When it's tapped, it'll show the sidebar.
-    [_settingsButton setTarget:self.revealViewController];
-    [_settingsButton setAction:@selector(revealToggle:)];
-    
-    // Set the host name button action. When it's tapped, it'll show the host selection view.
-    [_upButton setTarget:self];
-    [_upButton setAction:@selector(showHostSelectionView)];
-    [self disableUpButton];
-    
-    // Set the gesture
-    [self.view addGestureRecognizer:self.revealViewController.panGestureRecognizer];
-    
-    // Get callbacks associated with the viewController
-    [self.revealViewController setDelegate:self];
-    
-    // Disable bounce-back on reveal VC otherwise the settings will snap closed
-    // if the user drags all the way off the screen opposite the settings pane.
-    self.revealViewController.bounceBackOnOverdraw = NO;
-#else
     // The settings button will direct the user into the Settings app on tvOS
     [_settingsButton setTarget:self];
     [_settingsButton setAction:@selector(openTvSettings:)];
@@ -956,12 +847,8 @@ static NSMutableSet* hostList;
     _menuRecognizer.allowedPressTypes = [[NSArray alloc] initWithObjects:[NSNumber numberWithLong:UIPressTypeMenu], nil];
     
     self.navigationController.navigationBar.titleTextAttributes = [NSDictionary dictionaryWithObject:[UIColor whiteColor] forKey:NSForegroundColorAttributeName];
-#endif
     
     _loadingFrame = [self.storyboard instantiateViewControllerWithIdentifier:@"loadingFrame"];
-    
-    // Set the current position to the center
-    currentPosition = FrontViewPositionLeft;
     
     // Set up crypto
     [CryptoManager generateKeyPairUsingSSL];
@@ -985,14 +872,11 @@ static NSMutableSet* hostList;
     
     self.collectionView.delaysContentTouches = NO;
     self.collectionView.allowsMultipleSelection = NO;
-#if !TARGET_OS_TV
-    self.collectionView.multipleTouchEnabled = NO;
-#else
+
     // This is the only way to get long press events on a UICollectionViewCell :(
     UILongPressGestureRecognizer* cellLongPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleCollectionViewLongPress:)];
     cellLongPress.delaysTouchesBegan = YES;
     [self.collectionView addGestureRecognizer:cellLongPress];
-#endif
     
     [self retrieveSavedHosts];
     _discMan = [[DiscoveryManager alloc] initWithHosts:[hostList allObjects] andCallback:self];
@@ -1006,7 +890,6 @@ static NSMutableSet* hostList;
     }
 }
 
-#if TARGET_OS_TV
 -(void)handleCollectionViewLongPress:(UILongPressGestureRecognizer *)gestureRecognizer
 {
     // FIXME: Something is delaying touches so we only get to the Begin state
@@ -1026,7 +909,6 @@ static NSMutableSet* hostList;
 {
     [[UIApplication sharedApplication] openURL:[NSURL URLWithString:UIApplicationOpenSettingsURLString] options:@{} completionHandler:nil];
 }
-#endif
 
 -(void)beginForegroundRefresh
 {
@@ -1095,11 +977,6 @@ static NSMutableSet* hostList;
 - (void)viewDidAppear:(BOOL)animated
 {
     [super viewDidAppear:animated];
-    
-#if !TARGET_OS_TV
-    [[self revealViewController] setPrimaryViewController:self];
-#endif
-    
     [self.navigationController setNavigationBarHidden:NO animated:YES];
     
     // Hide 1px border line
@@ -1197,27 +1074,6 @@ static NSMutableSet* hostList;
 }
 
 - (void)updateHostShortcuts {
-#if !TARGET_OS_TV
-    NSMutableArray* quickActions = [[NSMutableArray alloc] init];
-    
-    @synchronized (hostList) {
-        for (TemporaryHost* host in hostList) {
-            // Pair state may be unknown if we haven't polled it yet, but the app list
-            // count will persist from paired PCs
-            if ([host.appList count] > 0) {
-                UIApplicationShortcutItem* shortcut = [[UIApplicationShortcutItem alloc]
-                                                       initWithType:@"PC"
-                                                       localizedTitle:host.name
-                                                       localizedSubtitle:nil
-                                                       icon:[UIApplicationShortcutIcon iconWithType:UIApplicationShortcutIconTypePlay]
-                                                       userInfo:[NSDictionary dictionaryWithObject:host.uuid forKey:@"UUID"]];
-                [quickActions addObject: shortcut];
-            }
-        }
-    }
-    
-    [UIApplication sharedApplication].shortcutItems = quickActions;
-#endif
 }
 
 - (void)updateHosts {
@@ -1258,13 +1114,7 @@ static NSMutableSet* hostList;
 }
 
 - (float) getCompViewX:(UIComputerView*)comp addComp:(UIComputerView*)addComp prevEdge:(float)prevEdge {
-    float padding;
-    
-#if TARGET_OS_TV
-    padding = 100;
-#else
-    padding = addComp.frame.size.width / 2;
-#endif
+    float padding = 100;
     
     if (prevEdge == -1) {
         return hostScrollView.frame.origin.x + comp.frame.size.width / 2 + padding;
@@ -1365,12 +1215,6 @@ static NSMutableSet* hostList;
     cell.layer.shadowColor = [UIColor blackColor].CGColor;
     cell.layer.shadowOffset = CGSizeMake(1.0f, 5.0f);
     cell.layer.shadowPath = shadowPath.CGPath;
-    
-#if !TARGET_OS_TV
-    cell.layer.borderWidth = 1;
-    cell.layer.borderColor = [[UIColor colorWithRed:0 green:0 blue:0 alpha:0.3f] CGColor];
-    cell.exclusiveTouch = YES;
-#endif
 
     return cell;
 }
@@ -1405,12 +1249,6 @@ static NSMutableSet* hostList;
     return YES;
 }
 
-#if !TARGET_OS_TV
-- (BOOL)shouldAutorotate {
-    return YES;
-}
-#endif
-
 - (void) disableNavigation {
     self.navigationController.navigationBar.topItem.rightBarButtonItem.enabled = NO;
     self.navigationController.navigationBar.topItem.leftBarButtonItem.enabled = NO;
@@ -1421,20 +1259,11 @@ static NSMutableSet* hostList;
     self.navigationController.navigationBar.topItem.leftBarButtonItem.enabled = YES;
 }
 
-#if TARGET_OS_TV
 - (BOOL)canBecomeFocused {
     return YES;
 }
-#endif
 
 - (void)didUpdateFocusInContext:(UIFocusUpdateContext *)context withAnimationCoordinator:(UIFocusAnimationCoordinator *)coordinator {
-    
-#if !TARGET_OS_TV
-    if (context.nextFocusedView != nil) {
-        [context.nextFocusedView setAlpha:0.8];
-    }
-    [context.previouslyFocusedView setAlpha:1.0];
-#endif
 }
 
 @end

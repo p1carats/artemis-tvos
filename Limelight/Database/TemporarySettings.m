@@ -7,7 +7,6 @@
 //
 
 #import "TemporarySettings.h"
-#import "OnScreenControls.h"
 
 @implementation TemporarySettings
 
@@ -16,7 +15,6 @@
     
     self.parent = settings;
     
-#if TARGET_OS_TV
     // Apply default values from our Root.plist
     NSString* settingsBundle = [[NSBundle mainBundle] pathForResource:@"Settings" ofType:@"bundle"];
     NSDictionary* settingsData = [NSDictionary dictionaryWithContentsOfFile:[settingsBundle stringByAppendingPathComponent:@"Root.plist"]];
@@ -67,25 +65,6 @@
         default:
             abort();
     }
-    self.onscreenControls = [NSNumber numberWithInteger:OnScreenControlsLevelOff];
-#else
-    self.bitrate = settings.bitrate;
-    self.framerate = settings.framerate;
-    self.height = settings.height;
-    self.width = settings.width;
-    self.audioConfig = settings.audioConfig;
-    self.preferredCodec = settings.preferredCodec;
-    self.useFramePacing = settings.useFramePacing;
-    self.playAudioOnPC = settings.playAudioOnPC;
-    self.enableHdr = settings.enableHdr;
-    self.optimizeGames = settings.optimizeGames;
-    self.multiController = settings.multiController;
-    self.swapABXYButtons = settings.swapABXYButtons;
-    self.onscreenControls = settings.onscreenControls;
-    self.btMouseSupport = settings.btMouseSupport;
-    self.absoluteTouchMode = settings.absoluteTouchMode;
-    self.statsOverlay = settings.statsOverlay;
-#endif
     self.uniqueId = settings.uniqueId;
     
     return self;

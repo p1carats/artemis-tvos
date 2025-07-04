@@ -16,28 +16,11 @@
 
 static NSOperationQueue* mainQueue;
 
-#if TARGET_OS_TV
 static NSString* DB_NAME = @"Moonlight_tvOS.bin";
-#else
-static NSString* DB_NAME = @"Limelight_iOS.sqlite";
-#endif
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
-#if !TARGET_OS_TV
-    UIApplicationShortcutItem* shortcut = [launchOptions valueForKey:UIApplicationLaunchOptionsShortcutItemKey];
-    if (shortcut != nil) {
-        _pcUuidToLoad = (NSString*)[shortcut.userInfo objectForKey:@"UUID"];
-    }
-#endif
     return YES;
 }
-
-#if !TARGET_OS_TV
-- (void)application:(UIApplication *)application performActionForShortcutItem:(UIApplicationShortcutItem *)shortcutItem completionHandler:(void (^)(BOOL succeeded))completionHandler {
-    _pcUuidToLoad = (NSString*)[shortcutItem.userInfo objectForKey:@"UUID"];
-    _shortcutCompletionHandler = completionHandler;
-}
-#endif
 
 - (void)applicationWillResignActive:(UIApplication *)application
 {
@@ -80,10 +63,8 @@ static NSString* DB_NAME = @"Limelight_iOS.sqlite";
                 Log(LOG_E, @"Critical database error: %@, %@", error, [error userInfo]);
             }
             
-#if TARGET_OS_TV
             NSData* dbData = [NSData dataWithContentsOfURL:[[[[NSFileManager defaultManager] URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask] lastObject] URLByAppendingPathComponent:DB_NAME]];
             [[NSUserDefaults standardUserDefaults] setObject:dbData forKey:DB_NAME];
-#endif
         }];
     }
 }
@@ -132,13 +113,9 @@ static NSString* DB_NAME = @"Limelight_iOS.sqlite";
                              [NSNumber numberWithBool:YES], NSInferMappingModelAutomaticallyOption, nil];
     NSString* storeType;
     
-#if TARGET_OS_TV
     // Use a binary store for tvOS since we will need exclusive access to the file
     // to serialize into NSUserDefaults.
     storeType = NSBinaryStoreType;
-#else
-    storeType = NSSQLiteStoreType;
-#endif
     
     // We must ensure the persistent store is ready to opened
     [self preparePersistentStore];
@@ -170,15 +147,12 @@ static NSString* DB_NAME = @"Limelight_iOS.sqlite";
     // Delete the file on disk
     [[NSFileManager defaultManager] removeItemAtURL:[self getStoreURL] error:nil];
     
-#if TARGET_OS_TV
     // Also delete the copy in the NSUserDefaults on tvOS
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:DB_NAME];
-#endif
 }
 
 - (void) preparePersistentStore
 {
-#if TARGET_OS_TV
     // On tvOS, we may need to inflate the DB from NSUserDefaults
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
     NSString *cacheDirectory = [paths objectAtIndex:0];
@@ -199,16 +173,11 @@ static NSString* DB_NAME = @"Limelight_iOS.sqlite";
     else {
         Log(LOG_I, @"Using cached database");
     }
-#endif
 }
 
 - (NSURL*) getStoreURL {
-#if TARGET_OS_TV
     // We use the cache folder to store our database on tvOS
     return [[[[NSFileManager defaultManager] URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask] lastObject] URLByAppendingPathComponent:DB_NAME];
-#else
-    return [[self applicationDocumentsDirectory] URLByAppendingPathComponent:DB_NAME];
-#endif
 }
 
 @end

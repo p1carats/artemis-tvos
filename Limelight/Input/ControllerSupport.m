@@ -9,8 +9,6 @@
 #import "ControllerSupport.h"
 #import "Controller.h"
 
-#import "OnScreenControls.h"
-
 #import "DataManager.h"
 #include "Limelight.h"
 
@@ -36,13 +34,9 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
     float accumulatedScrollX;
     float accumulatedScrollY;
     
-    OnScreenControls *_osc;
-    Controller *_oscController;
-    
 #define EMULATING_SELECT     0x1
 #define EMULATING_SPECIAL    0x2
     
-    bool _oscEnabled;
     char _controllerNumbers;
     bool _multiController;
     bool _swapABXYButtons;
@@ -57,9 +51,6 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
 -(void) rumble:(unsigned short)controllerNumber lowFreqMotor:(unsigned short)lowFreqMotor highFreqMotor:(unsigned short)highFreqMotor
 {
     Controller* controller = [_controllers objectForKey:[NSNumber numberWithInteger:controllerNumber]];
-    if (controller == nil && controllerNumber == 0 && _oscEnabled) {
-        // TODO: Rumble emulation for OSC
-    }
     if (controller == nil) {
         // No connected controller for this player
         return;
@@ -72,9 +63,6 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
 -(void) rumbleTriggers:(uint16_t)controllerNumber leftTrigger:(uint16_t)leftTrigger rightTrigger:(uint16_t)rightTrigger
 {
     Controller* controller = [_controllers objectForKey:[NSNumber numberWithInteger:controllerNumber]];
-    if (controller == nil && controllerNumber == 0 && _oscEnabled) {
-        // TODO: Trigger rumble emulation for OSC
-    }
     if (controller == nil) {
         // No connected controller for this player
         return;
@@ -318,7 +306,7 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
 
 -(uint16_t) getActiveGamepadMask
 {
-    return (_multiController ? _controllerNumbers : 1) | (_oscEnabled ? 1 : 0);
+    return (_multiController ? _controllerNumbers : 1);
 }
 
 -(void) updateFinished:(Controller*)controller
@@ -840,10 +828,8 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
         auxButton.pressedChangedHandler = nil;
     }
     
-#if TARGET_OS_TV
     mouse.mouseInput.scroll.xAxis.valueChangedHandler = nil;
     mouse.mouseInput.scroll.yAxis.valueChangedHandler = nil;
-#endif
 }
 
 -(void) registerMouseCallbacks:(GCMouse*) mouse API_AVAILABLE(ios(14.0)) {
@@ -889,7 +875,6 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
     // between discrete and continuous scroll events and also works around a bug
     // in iPadOS 15 where discrete scroll events are dropped. tvOS only supports
     // GCMouse for mice, so we will have to just use it and hope for the best.
-#if TARGET_OS_TV
     mouse.mouseInput.scroll.xAxis.valueChangedHandler = ^(GCControllerAxisInput * _Nonnull axis, float value) {
         self->accumulatedScrollX += value;
         
@@ -913,62 +898,6 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
             self->accumulatedScrollY -= truncatedScrollY;
         }
     };
-#endif
-}
-
--(void) updateAutoOnScreenControlMode
-{
-    // Auto on-screen control support may not be enabled
-    if (_osc == NULL) {
-        return;
-    }
-    
-    OnScreenControlsLevel level = OnScreenControlsLevelFull;
-    
-    // We currently stop after the first controller we find.
-    // Maybe we'll want to change that logic later.
-    for (int i = 0; i < [[GCController controllers] count]; i++) {
-        GCController *controller = [GCController controllers][i];
-        
-        if (controller != NULL) {
-            if (controller.extendedGamepad != NULL) {
-                level = OnScreenControlsLevelAutoGCExtendedGamepad;
-                if (@available(iOS 12.1, tvOS 12.1, *)) {
-                    if (controller.extendedGamepad.leftThumbstickButton != nil &&
-                        controller.extendedGamepad.rightThumbstickButton != nil) {
-                        level = OnScreenControlsLevelAutoGCExtendedGamepadWithStickButtons;
-                        if (@available(iOS 13.0, tvOS 13.0, *)) {
-                            if (controller.extendedGamepad.buttonOptions != nil) {
-                                // Has L3/R3 and Select, so we can show nothing :)
-                                level = OnScreenControlsLevelOff;
-                            }
-                        }
-                    }
-                }
-                break;
-            }
-        }
-    }
-    
-    // If we didn't find a gamepad present and we have a keyboard or mouse, turn
-    // the on-screen controls off to get the overlays out of the way.
-    if (level == OnScreenControlsLevelFull && [ControllerSupport hasKeyboardOrMouse]) {
-        level = OnScreenControlsLevelOff;
-        
-        // Ensure the virtual gamepad disappears to avoid confusing some games.
-        // If the mouse and keyboard disconnect later, it will reappear when the
-        // first OSC input is received.
-        LiSendMultiControllerEvent(0, 0, 0, 0, 0, 0, 0, 0, 0);
-    }
-    
-    [_osc setLevel:level];
-}
-
--(void) initAutoOnScreenControlMode:(OnScreenControls*)osc
-{
-    _osc = osc;
-    
-    [self updateAutoOnScreenControlMode];
 }
 
 -(Controller*) assignController:(GCController*)controller {
@@ -981,10 +910,6 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
             limeController.playerIndex = i;
             limeController.supportedEmulationFlags = EMULATING_SPECIAL | EMULATING_SELECT;
             limeController.gamepad = controller;
-
-            // If this is player 0, it shares state with the OSC
-            limeController.mergedWithController = _oscController;
-            _oscController.mergedWithController = limeController;
             
             if (@available(iOS 13.0, tvOS 13.0, *)) {
                 if (controller.extendedGamepad != nil &&
@@ -1013,10 +938,6 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
     }
     
     return nil;
-}
-
--(Controller*) getOscController {
-    return _oscController;
 }
 
 +(bool) isSupportedGamepad:(GCController*) controller {
@@ -1056,14 +977,6 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
     
     DataManager* dataMan = [[DataManager alloc] init];
     TemporarySettings* settings = [dataMan getSettings];
-    OnScreenControlsLevel level = (OnScreenControlsLevel)[settings.onscreenControls integerValue];
-    
-    // Even if no gamepads are present, we will always count one if OSC is enabled,
-    // or it's set to auto and no keyboard or mouse is present. Absolute touch mode
-    // disables the OSC.
-    if (level != OnScreenControlsLevelOff && (![ControllerSupport hasKeyboardOrMouse] || level != OnScreenControlsLevelAuto) && !settings.absoluteTouchMode) {
-        mask |= 0x1;
-    }
     
     return mask;
 }
@@ -1084,11 +997,7 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
     _swapABXYButtons = streamConfig.swapABXYButtons;
     _delegate = delegate;
 
-    _oscController = [[Controller alloc] init];
-    _oscController.playerIndex = 0;
-
     DataManager* dataMan = [[DataManager alloc] init];
-    _oscEnabled = (OnScreenControlsLevel)[[dataMan getSettings].onscreenControls integerValue] != OnScreenControlsLevelOff;
     
     Log(LOG_I, @"Number of supported controllers connected: %d", [ControllerSupport getGamepadCount]);
     Log(LOG_I, @"Multi-controller: %d", _multiController);
@@ -1126,9 +1035,6 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
             
             // Report the controller arrival to the host if we're connected
             [self reportControllerArrival:limeController];
-            
-            // Re-evaluate the on-screen control mode
-            [self updateAutoOnScreenControlMode];
             
             // Notify the delegate
             [self->_delegate gamepadPresenceChanged];
@@ -1169,9 +1075,6 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
             [self updateFinished:limeController];
             [self->_controllers removeObjectForKey:[NSNumber numberWithInteger:controller.playerIndex]];
             
-            // Re-evaluate the on-screen control mode
-            [self updateAutoOnScreenControlMode];
-            
             // Notify the delegate
             [self->_delegate gamepadPresenceChanged];
         }
@@ -1185,9 +1088,6 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
             
             // Register for mouse events
             [self registerMouseCallbacks: mouse];
-
-            // Re-evaluate the on-screen control mode
-            [self updateAutoOnScreenControlMode];
             
             // Notify the delegate
             [self->_delegate mousePresenceChanged];
@@ -1199,24 +1099,15 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
             
             // Unregister for mouse events
             [self unregisterMouseCallbacks: mouse];
-
-            // Re-evaluate the on-screen control mode
-            [self updateAutoOnScreenControlMode];
             
             // Notify the delegate
             [self->_delegate mousePresenceChanged];
         }];
         _keyboardConnectObserver = [[NSNotificationCenter defaultCenter] addObserverForName:GCKeyboardDidConnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
             Log(LOG_I, @"Keyboard connected!");
-            
-            // Re-evaluate the on-screen control mode
-            [self updateAutoOnScreenControlMode];
         }];
         _keyboardDisconnectObserver = [[NSNotificationCenter defaultCenter] addObserverForName:GCKeyboardDidDisconnectNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
             Log(LOG_I, @"Keyboard disconnected!");
-
-            // Re-evaluate the on-screen control mode
-            [self updateAutoOnScreenControlMode];
         }];
     }
     

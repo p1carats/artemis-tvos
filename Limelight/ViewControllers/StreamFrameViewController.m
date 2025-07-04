@@ -18,11 +18,9 @@
 #include <arpa/inet.h>
 #include <Limelight.h>
 
-#if TARGET_OS_TV
 #import <AVFoundation/AVDisplayCriteria.h>
 #import <AVKit/AVDisplayManager.h>
 #import <AVKit/UIWindow.h>
-#endif
 
 @interface AVDisplayCriteria()
 @property(readonly) int videoDynamicRange;
@@ -47,33 +45,24 @@
     UIScrollView *_scrollView;
     BOOL _userIsInteracting;
     CGSize _keyboardSize;
-    
-#if !TARGET_OS_TV
-    UIScreenEdgePanGestureRecognizer *_exitSwipeRecognizer;
-#endif
 }
 
 - (void)viewDidAppear:(BOOL)animated
 {
     [super viewDidAppear:animated];
-    
-#if !TARGET_OS_TV
-    [[self revealViewController] setPrimaryViewController:self];
-#endif
 }
 
-#if TARGET_OS_TV
 - (void)controllerPauseButtonPressed:(id)sender { }
+
 - (void)controllerPauseButtonDoublePressed:(id)sender {
     Log(LOG_I, @"Menu double-pressed -- backing out of stream");
     [self returnToMainFrame];
 }
+
 - (void)controllerPlayPauseButtonPressed:(id)sender {
     Log(LOG_I, @"Play/Pause button pressed -- backing out of stream");
     [self returnToMainFrame];
 }
-#endif
-
 
 - (void)viewDidLoad
 {
@@ -95,11 +84,7 @@
     
     _spinner = [[UIActivityIndicatorView alloc] init];
     [_spinner setUserInteractionEnabled:NO];
-#if TARGET_OS_TV
     [_spinner setActivityIndicatorViewStyle:UIActivityIndicatorViewStyleWhiteLarge];
-#else
-    [_spinner setActivityIndicatorViewStyle:UIActivityIndicatorViewStyleWhite];
-#endif
     [_spinner sizeToFit];
     [_spinner startAnimating];
     _spinner.center = CGPointMake(self.view.frame.size.width / 2, self.view.frame.size.height / 2 - _stageLabel.frame.size.height - _spinner.frame.size.height);
@@ -110,7 +95,6 @@
     _streamView = [[StreamView alloc] initWithFrame:self.view.frame];
     [_streamView setupStreamView:_controllerSupport interactionDelegate:self config:self.streamConfig];
     
-#if TARGET_OS_TV
     if (!_menuTapGestureRecognizer || !_menuDoubleTapGestureRecognizer || !_playPauseTapGestureRecognizer) {
         _menuTapGestureRecognizer = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(controllerPauseButtonPressed:)];
         _menuTapGestureRecognizer.allowedPressTypes = @[@(UIPressTypeMenu)];
@@ -127,25 +111,10 @@
     [self.view addGestureRecognizer:_menuTapGestureRecognizer];
     [self.view addGestureRecognizer:_menuDoubleTapGestureRecognizer];
     [self.view addGestureRecognizer:_playPauseTapGestureRecognizer];
-
-#else
-    _exitSwipeRecognizer = [[UIScreenEdgePanGestureRecognizer alloc] initWithTarget:self action:@selector(edgeSwiped)];
-    _exitSwipeRecognizer.edges = UIRectEdgeLeft;
-    _exitSwipeRecognizer.delaysTouchesBegan = NO;
-    _exitSwipeRecognizer.delaysTouchesEnded = NO;
-    
-    [self.view addGestureRecognizer:_exitSwipeRecognizer];
-#endif
     
     _tipLabel = [[UILabel alloc] init];
     [_tipLabel setUserInteractionEnabled:NO];
-    
-#if TARGET_OS_TV
     [_tipLabel setText:@"Tip: Tap the Play/Pause button on the Apple TV Remote to disconnect from your PC"];
-#else
-    [_tipLabel setText:@"Tip: Swipe from the left edge to disconnect from your PC"];
-#endif
-    
     [_tipLabel sizeToFit];
     _tipLabel.textColor = [UIColor whiteColor];
     _tipLabel.textAlignment = NSTextAlignmentCenter;
@@ -171,40 +140,9 @@
                                              selector: @selector(applicationDidEnterBackground:)
                                                  name: UIApplicationDidEnterBackgroundNotification
                                                object: nil];
-
-#if 0
-    // FIXME: This doesn't work reliably on iPad for some reason. Showing and hiding the keyboard
-    // several times in a row will not correctly restore the state of the UIScrollView.
-    [[NSNotificationCenter defaultCenter] addObserver: self
-                                             selector: @selector(keyboardWillShow:)
-                                                 name: UIKeyboardWillShowNotification
-                                               object: nil];
     
-    [[NSNotificationCenter defaultCenter] addObserver: self
-                                             selector: @selector(keyboardWillHide:)
-                                                 name: UIKeyboardWillHideNotification
-                                               object: nil];
-#endif
-    
-    // Only enable scroll and zoom in absolute touch mode
-    if (_settings.absoluteTouchMode) {
-        _scrollView = [[UIScrollView alloc] initWithFrame:self.view.frame];
-#if !TARGET_OS_TV
-        [_scrollView.panGestureRecognizer setMinimumNumberOfTouches:2];
-#endif
-        [_scrollView setShowsHorizontalScrollIndicator:NO];
-        [_scrollView setShowsVerticalScrollIndicator:NO];
-        [_scrollView setDelegate:self];
-        [_scrollView setMaximumZoomScale:10.0f];
-        
-        // Add StreamView inside a UIScrollView for absolute mode
-        [_scrollView addSubview:_streamView];
-        [self.view addSubview:_scrollView];
-    }
-    else {
-        // Add StreamView directly in relative mode
-        [self.view addSubview:_streamView];
-    }
+    // Add StreamView directly in relative mode
+    [self.view addSubview:_streamView];
     
     [self.view addSubview:_stageLabel];
     [self.view addSubview:_spinner];
@@ -229,30 +167,6 @@
     }
 }
 
-#if 0
-- (void)keyboardWillShow:(NSNotification *)notification {
-    _keyboardSize = [[[notification userInfo] objectForKey:UIKeyboardFrameBeginUserInfoKey] CGRectValue].size;
-
-    [UIView animateWithDuration:0.3 animations:^{
-        CGRect frame = self->_scrollView.frame;
-        frame.size.height -= self->_keyboardSize.height;
-        self->_scrollView.frame = frame;
-    }];
-}
-
--(void)keyboardWillHide:(NSNotification *)notification {
-    // NOTE: UIKeyboardFrameEndUserInfoKey returns a different keyboard size
-    // than UIKeyboardFrameBeginUserInfoKey, so it's unsuitable for use here
-    // to undo the changes made by keyboardWillShow.
-    
-    [UIView animateWithDuration:0.3 animations:^{
-        CGRect frame = self->_scrollView.frame;
-        frame.size.height += self->_keyboardSize.height;
-        self->_scrollView.frame = frame;
-    }];
-}
-#endif
-
 - (void)updateStatsOverlay {
     NSString* overlayText = [self->_streamMan getStatsOverlayText];
     
@@ -264,9 +178,6 @@
 - (void)updateOverlayText:(NSString*)text {
     if (_overlayView == nil) {
         _overlayView = [[UITextView alloc] init];
-#if !TARGET_OS_TV
-        [_overlayView setEditable:NO];
-#endif
         [_overlayView setUserInteractionEnabled:NO];
         [_overlayView setSelectable:NO];
         [_overlayView setScrollEnabled:NO];
@@ -278,11 +189,7 @@
         
         [_overlayView setTextColor:[UIColor lightGrayColor]];
         [_overlayView setBackgroundColor:[UIColor blackColor]];
-#if TARGET_OS_TV
         [_overlayView setFont:[UIFont systemFontOfSize:24]];
-#else
-        [_overlayView setFont:[UIFont systemFontOfSize:12]];
-#endif
         [_overlayView setAlpha:0.5];
         [self.view addSubview:_overlayView];
     }
@@ -320,16 +227,6 @@
     if (_inactivityTimer != nil) {
         [_inactivityTimer invalidate];
     }
-    
-#if !TARGET_OS_TV
-    // Terminate the stream if the app is inactive for 60 seconds
-    Log(LOG_I, @"Starting inactivity termination timer");
-    _inactivityTimer = [NSTimer scheduledTimerWithTimeInterval:60
-                                                      target:self
-                                                    selector:@selector(inactiveTimerExpired:)
-                                                    userInfo:nil
-                                                     repeats:NO];
-#endif
 }
 
 - (void)inactiveTimerExpired:(NSTimer*)timer {
@@ -361,12 +258,6 @@
     [self returnToMainFrame];
 }
 
-- (void)edgeSwiped {
-    Log(LOG_I, @"User swiped to end stream");
-    
-    [self returnToMainFrame];
-}
-
 - (void) connectionStarted {
     Log(LOG_I, @"Connection started");
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -374,8 +265,6 @@
         // the first frame of video.
         self->_stageLabel.hidden = YES;
         self->_tipLabel.hidden = YES;
-        
-        [self->_streamView showOnScreenControls];
         
         [self->_controllerSupport connectionEstablished];
         
@@ -585,7 +474,6 @@
 }
 
 - (void) updatePreferredDisplayMode:(BOOL)streamActive {
-#if TARGET_OS_TV
     if (@available(tvOS 11.2, *)) {
         UIWindow* window = [[[UIApplication sharedApplication] delegate] window];
         AVDisplayManager* displayManager = [window avDisplayManager];
@@ -610,7 +498,6 @@
             displayManager.preferredDisplayCriteria = nil;
         }
     }
-#endif
 }
 
 - (void) setHdrMode:(bool)enabled {
@@ -632,19 +519,9 @@
 }
 
 - (void)gamepadPresenceChanged {
-#if !TARGET_OS_TV
-    if (@available(iOS 11.0, *)) {
-        [self setNeedsUpdateOfHomeIndicatorAutoHidden];
-    }
-#endif
 }
 
 - (void)mousePresenceChanged {
-#if !TARGET_OS_TV
-    if (@available(iOS 14.0, *)) {
-        [self setNeedsUpdateOfPrefersPointerLocked];
-    }
-#endif
 }
 
 - (void) streamExitRequested {
@@ -659,56 +536,11 @@
     // also discard our edges deferring system gestures unless
     // we willingly give up home bar hiding preference.
     _userIsInteracting = YES;
-#if !TARGET_OS_TV
-    if (@available(iOS 11.0, *)) {
-        [self setNeedsUpdateOfHomeIndicatorAutoHidden];
-    }
-#endif
 }
 
 - (void)userInteractionEnded {
     // Enable home bar hiding again if conditions allow
     _userIsInteracting = NO;
-#if !TARGET_OS_TV
-    if (@available(iOS 11.0, *)) {
-        [self setNeedsUpdateOfHomeIndicatorAutoHidden];
-    }
-#endif
 }
-
-#if !TARGET_OS_TV
-// Require a confirmation when streaming to activate a system gesture
-- (UIRectEdge)preferredScreenEdgesDeferringSystemGestures {
-    return UIRectEdgeAll;
-}
-
-- (BOOL)prefersHomeIndicatorAutoHidden {
-    if ([_controllerSupport getConnectedGamepadCount] > 0 &&
-        [_streamView getCurrentOscState] == OnScreenControlsLevelOff &&
-        _userIsInteracting == NO) {
-        // Autohide the home bar when a gamepad is connected
-        // and the on-screen controls are disabled. We can't
-        // do this all the time because any touch on the display
-        // will cause the home indicator to reappear, and our
-        // preferredScreenEdgesDeferringSystemGestures will also
-        // be suppressed (leading to possible errant exits of the
-        // stream).
-        return YES;
-    }
-    
-    return NO;
-}
-
-- (BOOL)shouldAutorotate {
-    return YES;
-}
-
-- (BOOL)prefersPointerLocked {
-    // Pointer lock breaks the UIKit mouse APIs, which is a problem because
-    // GCMouse is horribly broken on iOS 14.0 for certain mice. Only lock
-    // the cursor if there is a GCMouse present.
-    return [GCMouse mice].count > 0;
-}
-#endif
 
 @end
