@@ -132,39 +132,19 @@
 }
 
 +(HapticContext*) createContextForHighFreqMotor:(GCController*)gamepad {
-    if (@available(iOS 14.0, tvOS 14.0, *)) {
-        return [[HapticContext alloc] initWithGamepad:gamepad locality:GCHapticsLocalityRightHandle];
-    }
-    else {
-        return nil;
-    }
+    return [[HapticContext alloc] initWithGamepad:gamepad locality:GCHapticsLocalityRightHandle];
 }
 
 +(HapticContext*) createContextForLowFreqMotor:(GCController*)gamepad {
-    if (@available(iOS 14.0, tvOS 14.0, *)) {
-        return [[HapticContext alloc] initWithGamepad:gamepad locality:GCHapticsLocalityLeftHandle];
-    }
-    else {
-        return nil;
-    }
+    return [[HapticContext alloc] initWithGamepad:gamepad locality:GCHapticsLocalityLeftHandle];
 }
 
 +(HapticContext*) createContextForLeftTrigger:(GCController*)gamepad {
-    if (@available(iOS 14.0, tvOS 14.0, *)) {
-        return [[HapticContext alloc] initWithGamepad:gamepad locality:GCHapticsLocalityLeftTrigger];
-    }
-    else {
-        return nil;
-    }
+    return [[HapticContext alloc] initWithGamepad:gamepad locality:GCHapticsLocalityLeftTrigger];
 }
 
 +(HapticContext*) createContextForRightTrigger:(GCController*)gamepad {
-    if (@available(iOS 14.0, tvOS 14.0, *)) {
-        return [[HapticContext alloc] initWithGamepad:gamepad locality:GCHapticsLocalityRightTrigger];
-    }
-    else {
-        return nil;
-    }
+    return [[HapticContext alloc] initWithGamepad:gamepad locality:GCHapticsLocalityRightTrigger];
 }
 
 @end

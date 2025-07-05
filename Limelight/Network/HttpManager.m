@@ -54,8 +54,8 @@
     self = [super init];
     // Use the same UID for all Moonlight clients to allow them
     // quit games started on another Moonlight client.
-    _uniqueId = @"0123456789ABCDEF";
-    _deviceName = deviceName;
+    _uniqueId = [@"0123456789ABCDEF" copy];
+    _deviceName = [deviceName copy];;
     _serverCert = serverCert;
     
     NSString* address = [Utils addressPortStringToAddress:hostAddressPortString];
@@ -314,90 +314,105 @@
 }
 
 // Returns an array containing the certificate
-- (NSArray*)getCertificate:(SecIdentityRef) identity {
+- (NSArray *)getCertificate:(SecIdentityRef)identity {
     SecCertificateRef certificate = nil;
     
-    SecIdentityCopyCertificate(identity, &certificate);
-    
-    return [[NSArray alloc] initWithObjects:(__bridge_transfer id)certificate, nil];
+    if (SecIdentityCopyCertificate(identity, &certificate) != errSecSuccess || certificate == nil) {
+        Log(LOG_E, @"Failed to extract certificate from identity");
+        return @[];
+    }
+
+    return @[ (__bridge_transfer id)certificate ];
 }
 
 // Returns the identity
 - (SecIdentityRef)getClientCertificate {
     SecIdentityRef identityApp = nil;
-    CFDataRef p12Data = (__bridge CFDataRef)[CryptoManager readP12FromFile];
-
-    CFStringRef password = CFSTR("limelight");
-    const void *keys[] = { kSecImportExportPassphrase };
-    const void *values[] = { password };
-    CFDictionaryRef options = CFDictionaryCreate(NULL, keys, values, 1, NULL, NULL);
-    CFArrayRef items = nil;
-    OSStatus securityError = SecPKCS12Import(p12Data, options, &items);
-
-    if (securityError == errSecSuccess) {
-        //Log(LOG_D, @"Success opening p12 certificate. Items: %ld", CFArrayGetCount(items));
-        CFDictionaryRef identityDict = CFArrayGetValueAtIndex(items, 0);
-        identityApp = (SecIdentityRef)CFRetain(CFDictionaryGetValue(identityDict, kSecImportItemIdentity));
-        CFRelease(items);
-    } else {
-        Log(LOG_E, @"Error opening Certificate.");
+    
+    // Get P12 data
+    NSData *p12Data = [CryptoManager readP12FromFile];
+    if (!p12Data) {
+        Log(LOG_E, @"Could not read .p12 file");
+        return nil;
     }
+
+    // Setup password dictionary
+    NSDictionary *options = @{ (__bridge id)kSecImportExportPassphrase : @"limelight" };
     
-    CFRelease(options);
-    CFRelease(password);
+    CFArrayRef items = NULL;
+    OSStatus securityError = SecPKCS12Import((__bridge CFDataRef)p12Data,
+                                             (__bridge CFDictionaryRef)options,
+                                             &items);
     
+    if (securityError == errSecSuccess && CFArrayGetCount(items) > 0) {
+        CFDictionaryRef identityDict = CFArrayGetValueAtIndex(items, 0);
+        SecIdentityRef identity = (SecIdentityRef)CFDictionaryGetValue(identityDict, kSecImportItemIdentity);
+        if (identity) {
+            identityApp = (SecIdentityRef)CFRetain(identity);
+        }
+    } else {
+        Log(LOG_E, @"Error opening certificate (status %d)", (int)securityError);
+    }
+
+    if (items != NULL) {
+        CFRelease(items);
+    }
+
     return identityApp;
 }
 
-- (void)URLSession:(NSURLSession *)session didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge completionHandler:(nonnull void (^)(NSURLSessionAuthChallengeDisposition, NSURLCredential * __nullable))completionHandler {
+- (void)URLSession:(NSURLSession *)session
+        didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge
+          completionHandler:(nonnull void (^)(NSURLSessionAuthChallengeDisposition, NSURLCredential * __nullable))completionHandler {
+    
     // Allow untrusted server certificates
-    if([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust])
-    {
-        if (SecTrustGetCertificateCount(challenge.protectionSpace.serverTrust) != 1) {
+    if ([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust]) {
+        NSArray *certChain = (__bridge_transfer NSArray *)SecTrustCopyCertificateChain(challenge.protectionSpace.serverTrust);
+        
+        if (certChain.count != 1) {
             Log(LOG_E, @"Server certificate count mismatch");
-            completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
+            completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
             return;
         }
         
-        SecCertificateRef actualCert = SecTrustGetCertificateAtIndex(challenge.protectionSpace.serverTrust, 0);
+        SecCertificateRef actualCert = (__bridge SecCertificateRef)(certChain[0]);
         if (actualCert == nil) {
             Log(LOG_E, @"Server certificate parsing error");
-            completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
+            completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
             return;
         }
         
-        CFDataRef actualCertData = SecCertificateCopyData(actualCert);
+        NSData *actualCertData = (__bridge_transfer NSData *)SecCertificateCopyData(actualCert);
         if (actualCertData == nil) {
             Log(LOG_E, @"Server certificate data parsing error");
-            completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
+            completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
             return;
         }
         
-        if (!CFEqual(actualCertData, (__bridge CFDataRef)_serverCert)) {
+        if (![_serverCert isEqualToData:actualCertData]) {
             Log(LOG_E, @"Server certificate mismatch");
-            CFRelease(actualCertData);
-            completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
+            completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
             return;
         }
-        
-        CFRelease(actualCertData);
-        
-        // Allow TLS handshake to proceed
+
+        // Allow TLS handshake to proceed as certificate matches
         completionHandler(NSURLSessionAuthChallengeUseCredential,
-                          [NSURLCredential credentialForTrust: challenge.protectionSpace.serverTrust]);
+                          [NSURLCredential credentialForTrust:challenge.protectionSpace.serverTrust]);
     }
     // Respond to client certificate challenge with our certificate
-    else if ([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodClientCertificate])
-    {
+    else if ([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodClientCertificate]) {
         SecIdentityRef identity = [self getClientCertificate];
-        NSArray* certArray = [self getCertificate:identity];
-        NSURLCredential* newCredential = [NSURLCredential credentialWithIdentity:identity certificates:certArray persistence:NSURLCredentialPersistencePermanent];
-        CFRelease(identity);
+        NSArray *certArray = [self getCertificate:identity];
+        NSURLCredential *newCredential = [NSURLCredential credentialWithIdentity:identity
+                                                                     certificates:certArray
+                                                                      persistence:NSURLCredentialPersistencePermanent];
+        if (identity != NULL) {
+            CFRelease(identity);
+        }
         completionHandler(NSURLSessionAuthChallengeUseCredential, newCredential);
     }
-    else
-    {
-        completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, NULL);
+    else {
+        completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
     }
 }
 

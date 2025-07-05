@@ -102,12 +102,7 @@ extern int ff_isom_write_av1c(AVIOContext *pb, const uint8_t *buf, int size,
 - (void)start
 {
     _displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(displayLinkCallback:)];
-    if (@available(iOS 15.0, tvOS 15.0, *)) {
-        _displayLink.preferredFrameRateRange = CAFrameRateRangeMake(self->frameRate, self->frameRate, self->frameRate);
-    }
-    else {
-        _displayLink.preferredFramesPerSecond = self->frameRate;
-    }
+    _displayLink.preferredFrameRateRange = CAFrameRateRangeMake(self->frameRate, self->frameRate, self->frameRate);
     [_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSDefaultRunLoopMode];
 }
 
@@ -434,9 +429,10 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
         
         if (videoFormat & VIDEO_FORMAT_MASK_H264) {
             // Construct parameter set arrays for the format description
-            size_t parameterSetCount = [parameterSetBuffers count];
-            const uint8_t* parameterSetPointers[parameterSetCount];
-            size_t parameterSetSizes[parameterSetCount];
+            size_t parameterSetCount = parameterSetBuffers.count;
+            const uint8_t **parameterSetPointers = malloc(sizeof(*parameterSetPointers) * parameterSetCount);
+            size_t *parameterSetSizes = malloc(sizeof(*parameterSetSizes) * parameterSetCount);
+            
             for (int i = 0; i < parameterSetCount; i++) {
                 NSData* parameterSet = parameterSetBuffers[i];
                 parameterSetPointers[i] = parameterSet.bytes;
@@ -456,13 +452,16 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
             }
             
             // Free parameter set buffers after submission
+            free(parameterSetPointers);
+            free(parameterSetSizes);
             [parameterSetBuffers removeAllObjects];
         }
         else if (videoFormat & VIDEO_FORMAT_MASK_H265) {
             // Construct parameter set arrays for the format description
-            size_t parameterSetCount = [parameterSetBuffers count];
-            const uint8_t* parameterSetPointers[parameterSetCount];
-            size_t parameterSetSizes[parameterSetCount];
+            size_t parameterSetCount = parameterSetBuffers.count;
+            const uint8_t **parameterSetPointers = malloc(sizeof(*parameterSetPointers) * parameterSetCount);
+            size_t *parameterSetSizes = malloc(sizeof(*parameterSetSizes) * parameterSetCount);
+            
             for (int i = 0; i < parameterSetCount; i++) {
                 NSData* parameterSet = parameterSetBuffers[i];
                 parameterSetPointers[i] = parameterSet.bytes;
@@ -495,6 +494,8 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
             }
             
             // Free parameter set buffers after submission
+            free(parameterSetPointers);
+            free(parameterSetSizes);
             [parameterSetBuffers removeAllObjects];
         }
         else if (videoFormat & VIDEO_FORMAT_MASK_AV1) {
@@ -516,8 +517,8 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
     }
     
     // Check for previous decoder errors before doing anything
-    if (displayLayer.status == AVQueuedSampleBufferRenderingStatusFailed) {
-        Log(LOG_E, @"Display layer rendering failed: %@", displayLayer.error);
+    if (displayLayer.sampleBufferRenderer.status == AVQueuedSampleBufferRenderingStatusFailed) {
+        Log(LOG_E, @"Display layer rendering failed: %@", displayLayer.sampleBufferRenderer.error);
         
         // Recreate the display layer. We are already on the main thread,
         // so this is safe to do right here.
@@ -595,7 +596,7 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
     }
 
     // Enqueue the next frame
-    [self->displayLayer enqueueSampleBuffer:sampleBuffer];
+    [self->displayLayer.sampleBufferRenderer enqueueSampleBuffer:sampleBuffer];
     
     if (du->frameType == FRAME_TYPE_IDR) {
         // Ensure the layer is visible now

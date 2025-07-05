@@ -13,24 +13,24 @@
 
 @property (atomic) State state;
 @property (atomic) PairState pairState;
-@property (atomic, nullable, retain) NSString * activeAddress;
-@property (atomic, nullable, retain) NSString * currentGame;
+@property (atomic, nullable, strong) NSString * activeAddress;
+@property (atomic, nullable, strong) NSString * currentGame;
 @property (atomic) unsigned short httpsPort;
 @property (atomic) BOOL isNvidiaServerSoftware;
 
-@property (atomic, nullable, retain) NSData *serverCert;
-@property (atomic, nullable, retain) NSString *address;
-@property (atomic, nullable, retain) NSString *externalAddress;
-@property (atomic, nullable, retain) NSString *localAddress;
-@property (atomic, nullable, retain) NSString *ipv6Address;
-@property (atomic, nullable, retain) NSString *mac;
+@property (atomic, nullable, strong) NSData *serverCert;
+@property (atomic, nullable, strong) NSString *address;
+@property (atomic, nullable, strong) NSString *externalAddress;
+@property (atomic, nullable, strong) NSString *localAddress;
+@property (atomic, nullable, strong) NSString *ipv6Address;
+@property (atomic, nullable, strong) NSString *mac;
 @property (atomic)                   int serverCodecModeSupport;
 
 NS_ASSUME_NONNULL_BEGIN
 
-@property (atomic, retain) NSString *name;
-@property (atomic, retain) NSString *uuid;
-@property (atomic, retain) NSSet *appList;
+@property (atomic, strong) NSString *name;
+@property (atomic, strong) NSString *uuid;
+@property (atomic, strong) NSSet *appList;
 
 - (id) initFromHost:(Host*)host;
 

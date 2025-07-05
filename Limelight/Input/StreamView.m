@@ -214,14 +214,12 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
 - (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
     BOOL handled = NO;
     
-    if (@available(iOS 13.4, tvOS 13.4, *)) {
-        for (UIPress* press in presses) {
-            // For now, we'll treated it as handled if we handle at least one of the
-            // UIPress events inside the set.
-            if ([KeyboardSupport sendKeyEventForPress:press down:YES]) {
-                // This will prevent the legacy UITextField from receiving the event
-                handled = YES;
-            }
+    for (UIPress* press in presses) {
+        // For now, we'll treated it as handled if we handle at least one of the
+        // UIPress events inside the set.
+        if ([KeyboardSupport sendKeyEventForPress:press down:YES]) {
+            // This will prevent the legacy UITextField from receiving the event
+            handled = YES;
         }
     }
     
@@ -233,14 +231,12 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
 - (void)pressesEnded:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
     BOOL handled = NO;
     
-    if (@available(iOS 13.4, tvOS 13.4, *)) {
-        for (UIPress* press in presses) {
-            // For now, we'll treated it as handled if we handle at least one of the
-            // UIPress events inside the set.
-            if ([KeyboardSupport sendKeyEventForPress:press down:NO]) {
-                // This will prevent the legacy UITextField from receiving the event
-                handled = YES;
-            }
+    for (UIPress* press in presses) {
+        // For now, we'll treated it as handled if we handle at least one of the
+        // UIPress events inside the set.
+        if ([KeyboardSupport sendKeyEventForPress:press down:NO]) {
+            // This will prevent the legacy UITextField from receiving the event
+            handled = YES;
         }
     }
     

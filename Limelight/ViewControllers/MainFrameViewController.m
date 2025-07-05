@@ -411,7 +411,9 @@ static NSMutableSet* hostList;
 }
 
 - (UIViewController*) activeViewController {
-    UIViewController *topController = [UIApplication sharedApplication].keyWindow.rootViewController;
+    UIWindowScene *windowScene = (UIWindowScene *)[UIApplication sharedApplication].connectedScenes.anyObject;
+    UIWindow *keyWindow = windowScene.windows.firstObject;
+    UIViewController *topController = keyWindow.rootViewController;
 
     while (topController.presentedViewController) {
         topController = topController.presentedViewController;
@@ -571,13 +573,11 @@ static NSMutableSet* hostList;
     DataManager* dataMan = [[DataManager alloc] init];
     TemporarySettings* streamSettings = [dataMan getSettings];
     
+    // Don't stream more FPS than the display can show
     _streamConfig.frameRate = [streamSettings.framerate intValue];
-    if (@available(iOS 10.3, *)) {
-        // Don't stream more FPS than the display can show
-        if (_streamConfig.frameRate > [UIScreen mainScreen].maximumFramesPerSecond) {
-            _streamConfig.frameRate = (int)[UIScreen mainScreen].maximumFramesPerSecond;
-            Log(LOG_W, @"Clamping FPS to maximum refresh rate: %d", _streamConfig.frameRate);
-        }
+    if (_streamConfig.frameRate > [UIScreen mainScreen].maximumFramesPerSecond) {
+        _streamConfig.frameRate = (int)[UIScreen mainScreen].maximumFramesPerSecond;
+        Log(LOG_W, @"Clamping FPS to maximum refresh rate: %d", _streamConfig.frameRate);
     }
     
     _streamConfig.height = [streamSettings.height intValue];

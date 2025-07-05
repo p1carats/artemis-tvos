@@ -18,7 +18,7 @@ typedef struct {
     float lastY;
 } controller_touch_context_t;
 
-@property (nullable, nonatomic, retain) GCController* gamepad;
+@property (nullable, nonatomic, strong) GCController* gamepad;
 @property (nonatomic)                   int playerIndex;
 @property (nonatomic)                   int lastButtonFlags;
 @property (nonatomic)                   int emulatingButtonFlags;

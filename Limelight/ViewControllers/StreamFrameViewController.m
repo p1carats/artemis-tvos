@@ -84,7 +84,7 @@
     
     _spinner = [[UIActivityIndicatorView alloc] init];
     [_spinner setUserInteractionEnabled:NO];
-    [_spinner setActivityIndicatorViewStyle:UIActivityIndicatorViewStyleWhiteLarge];
+    [_spinner setActivityIndicatorViewStyle:UIActivityIndicatorViewStyleLarge];
     [_spinner sizeToFit];
     [_spinner startAnimating];
     _spinner.center = CGPointMake(self.view.frame.size.width / 2, self.view.frame.size.height / 2 - _stageLabel.frame.size.height - _spinner.frame.size.height);

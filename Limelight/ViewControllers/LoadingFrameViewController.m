@@ -19,7 +19,9 @@
 }
 
 - (UIViewController*) activeViewController {
-    UIViewController *topController = [UIApplication sharedApplication].keyWindow.rootViewController;
+    UIWindowScene *windowScene = (UIWindowScene *)[UIApplication sharedApplication].connectedScenes.anyObject;
+    UIWindow *keyWindow = windowScene.windows.firstObject;
+    UIViewController *topController = keyWindow.rootViewController;
     
     while (topController.presentedViewController) {
         topController = topController.presentedViewController;

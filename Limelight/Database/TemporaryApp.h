@@ -11,12 +11,12 @@
 
 @interface TemporaryApp : NSObject
 
-@property (nullable, nonatomic, retain) NSString *id;
-@property (nullable, nonatomic, retain) NSString *name;
-@property (nullable, nonatomic, retain) NSString *installPath;
+@property (nullable, nonatomic, strong) NSString *id;
+@property (nullable, nonatomic, strong) NSString *name;
+@property (nullable, nonatomic, strong) NSString *installPath;
 @property (nonatomic)                   BOOL hdrSupported;
 @property (nonatomic)                   BOOL hidden;
-@property (nullable, nonatomic, retain) TemporaryHost *host;
+@property (nullable, nonatomic, strong) TemporaryHost *host;
 
 NS_ASSUME_NONNULL_BEGIN
 
