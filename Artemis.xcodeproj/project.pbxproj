@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		693B3A9B218638CD00982F7B /* Settings.bundle in Resources */ = {isa = PBXBuildFile; fileRef = 693B3A9A218638CD00982F7B /* Settings.bundle */; };
-		98181BEB2791278F00E43572 /* libSDL2.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 98181BEA2791278300E43572 /* libSDL2.a */; };
 		9865DC30213260B40005B9B9 /* libmoonlight-common-tv.a in Frameworks */ = {isa = PBXBuildFile; fileRef = FB1A68152132509400507771 /* libmoonlight-common-tv.a */; };
 		9865DC36213287F30005B9B9 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = FB290D0319B2C406004C83CF /* AppDelegate.m */; };
 		98882A0C2AF60F9E00C5A11C /* libavcodec.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 98882A0A2AF60F9000C5A11C /* libavcodec.a */; };
@@ -208,7 +207,6 @@
 				98882A0E2AF60FA300C5A11C /* libavutil.a in Frameworks */,
 				F74BEFA42C1A80E400224667 /* OpenSSL in Frameworks */,
 				FB1A67E821324DE300507771 /* libopus.a in Frameworks */,
-				98181BEB2791278F00E43572 /* libSDL2.a in Frameworks */,
 				98882A0C2AF60F9E00C5A11C /* libavcodec.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -10,9 +10,7 @@
 #import "Utils.h"
 
 #import <VideoToolbox/VideoToolbox.h>
-
-#define SDL_MAIN_HANDLED
-#import <SDL.h>
+#import <AVFoundation/AVFoundation.h>
 
 #include "Limelight.h"
 #include "opus_multistream.h"
@@ -38,7 +36,11 @@ static video_stats_t currentVideoStats;
 static video_stats_t lastVideoStats;
 static NSLock* videoStatsLock;
 
-static SDL_AudioDeviceID audioDevice;
+static AVAudioEngine* audioEngine;
+static AVAudioPlayerNode* playerNode;
+static AVAudioFormat* audioFormat;
+static NSMutableArray* audioBufferQueue;
+static NSLock* audioBufferLock;
 static OPUS_MULTISTREAM_CONFIGURATION audioConfig;
 static void* audioBuffer;
 static int audioFrameSize;
@@ -190,34 +192,62 @@ int DrSubmitDecodeUnit(PDECODE_UNIT decodeUnit)
 int ArInit(int audioConfiguration, POPUS_MULTISTREAM_CONFIGURATION opusConfig, void* context, int flags)
 {
     int err;
-    SDL_AudioSpec want, have;
+    NSError* error = nil;
     
-    if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) {
-        Log(LOG_E, @"Failed to initialize audio subsystem: %s\n", SDL_GetError());
+    // Initialize audio session
+    AVAudioSession* session = [AVAudioSession sharedInstance];
+    if (![session setCategory:AVAudioSessionCategoryPlayback withOptions:AVAudioSessionCategoryOptionMixWithOthers error:&error]) {
+        Log(LOG_E, @"Failed to set audio session category: %@", error.localizedDescription);
         return -1;
     }
-        
-    SDL_zero(want);
-    want.freq = opusConfig->sampleRate;
-    want.format = AUDIO_S16;
-    want.channels = opusConfig->channelCount;
-    want.samples = opusConfig->samplesPerFrame;
-
-    audioDevice = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
-    if (audioDevice == 0) {
-        Log(LOG_E, @"Failed to open audio device: %s\n", SDL_GetError());
+    
+    if (![session setActive:YES error:&error]) {
+        Log(LOG_E, @"Failed to activate audio session: %@", error.localizedDescription);
+        return -1;
+    }
+    
+    // Create audio engine and player node
+    audioEngine = [[AVAudioEngine alloc] init];
+    playerNode = [[AVAudioPlayerNode alloc] init];
+    
+    // Support full multi-channel audio (stereo, 5.1, 7.1)
+    double sampleRate = opusConfig->sampleRate;
+    AVAudioChannelCount channelCount = (AVAudioChannelCount)opusConfig->channelCount;
+    
+    Log(LOG_I, @"Initializing audio with %d channels at %g Hz", channelCount, sampleRate);
+    
+    audioFormat = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:sampleRate
+                                                                  channels:channelCount];
+    
+    if (audioFormat == nil) {
+        Log(LOG_E, @"Failed to create audio format");
+        ArCleanup();
+        return -1;
+    }
+    
+    // Attach and connect nodes with the multi-channel format
+    [audioEngine attachNode:playerNode];
+    [audioEngine connect:playerNode to:audioEngine.mainMixerNode format:audioFormat];
+    
+    // Start audio engine
+    if (![audioEngine startAndReturnError:&error]) {
+        Log(LOG_E, @"Failed to start audio engine: %@", error.localizedDescription);
         ArCleanup();
         return -1;
     }
     
     audioConfig = *opusConfig;
-    audioFrameSize = opusConfig->samplesPerFrame * sizeof(short) * opusConfig->channelCount;
-    audioBuffer = SDL_malloc(audioFrameSize);
+    audioFrameSize = opusConfig->samplesPerFrame * sizeof(float) * opusConfig->channelCount;
+    audioBuffer = malloc(audioFrameSize);
     if (audioBuffer == NULL) {
         Log(LOG_E, @"Failed to allocate audio frame buffer");
         ArCleanup();
         return -1;
     }
+    
+    // Initialize buffer queue and lock
+    audioBufferQueue = [[NSMutableArray alloc] init];
+    audioBufferLock = [[NSLock alloc] init];
     
     opusDecoder = opus_multistream_decoder_create(opusConfig->sampleRate,
                                                   opusConfig->channelCount,
@@ -232,10 +262,7 @@ int ArInit(int audioConfiguration, POPUS_MULTISTREAM_CONFIGURATION opusConfig, v
     }
     
     // Start playback
-    SDL_PauseAudioDevice(audioDevice, 0);
-    
-    // Disable lowering volume of other audio streams (SDL sets AVAudioSessionCategoryOptionDuckOthers by default)
-    [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback withOptions:AVAudioSessionCategoryOptionMixWithOthers error:nil];
+    [playerNode play];
     
     return 0;
 }
@@ -247,43 +274,104 @@ void ArCleanup(void)
         opusDecoder = NULL;
     }
     
-    if (audioDevice != 0) {
-        SDL_CloseAudioDevice(audioDevice);
-        audioDevice = 0;
+    if (playerNode != nil) {
+        [playerNode stop];
+        playerNode = nil;
+    }
+    
+    if (audioEngine != nil) {
+        [audioEngine stop];
+        audioEngine = nil;
+    }
+    
+    if (audioBufferLock != nil) {
+        [audioBufferLock lock];
+        [audioBufferQueue removeAllObjects];
+        [audioBufferLock unlock];
+        audioBufferQueue = nil;
+        audioBufferLock = nil;
     }
     
     if (audioBuffer != NULL) {
-        SDL_free(audioBuffer);
+        free(audioBuffer);
         audioBuffer = NULL;
     }
     
-    SDL_QuitSubSystem(SDL_INIT_AUDIO);
+    audioFormat = nil;
 }
+
+void scheduleNextBuffer(void);
 
 void ArDecodeAndPlaySample(char* sampleData, int sampleLength)
 {
     int decodeLen;
     
-    // Don't queue if there's already more than 30 ms of audio data waiting
-    // in Moonlight's audio queue.
+    // Don't queue if there's already more than 30 ms of audio data waiting in queue
     if (LiGetPendingAudioDuration() > 30) {
         return;
     }
     
-    decodeLen = opus_multistream_decode(opusDecoder, (unsigned char *)sampleData, sampleLength,
-                                        (short*)audioBuffer, audioConfig.samplesPerFrame, 0);
+    // Use opus_multistream_decode_float for direct float32 output - equivalent to AUDIO_F32
+    decodeLen = opus_multistream_decode_float(opusDecoder, (unsigned char *)sampleData, sampleLength,
+                                              (float*)audioBuffer, audioConfig.samplesPerFrame, 0);
     if (decodeLen > 0) {
         // Provide backpressure on the queue to ensure too many frames don't build up
-        // in SDL's audio queue.
-        while (SDL_GetQueuedAudioSize(audioDevice) / audioFrameSize > 10) {
-            SDL_Delay(1);
+        [audioBufferLock lock];
+        NSUInteger queueSize = audioBufferQueue.count;
+        [audioBufferLock unlock];
+        
+        while (queueSize > 10) {
+            usleep(1000); // 1ms delay (equivalent to SDL_Delay(1))
+            [audioBufferLock lock];
+            queueSize = audioBufferQueue.count;
+            [audioBufferLock unlock];
         }
         
-        if (SDL_QueueAudio(audioDevice,
-                           audioBuffer,
-                           sizeof(short) * decodeLen * audioConfig.channelCount) < 0) {
-            Log(LOG_E, @"Failed to queue audio sample: %s\n", SDL_GetError());
+        // Create AVAudioPCMBuffer with the multi-channel format
+        AVAudioPCMBuffer* pcmBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:audioFormat
+                                                                    frameCapacity:decodeLen];
+        if (pcmBuffer != nil) {
+            pcmBuffer.frameLength = decodeLen;
+            
+            float* sourceData = (float*)audioBuffer;
+            float* const* destChannels = pcmBuffer.floatChannelData;
+            
+            // Direct channel mapping for all configurations (stereo, 5.1, 7.1)
+            // Opus decoder outputs interleaved multi-channel data
+            // AVAudioPCMBuffer expects non-interleaved (planar) channel data
+            for (int ch = 0; ch < audioFormat.channelCount; ch++) {
+                for (int i = 0; i < decodeLen; i++) {
+                    destChannels[ch][i] = sourceData[i * audioConfig.channelCount + ch];
+                }
+            }
+            
+            // Queue buffer
+            [audioBufferLock lock];
+            [audioBufferQueue addObject:pcmBuffer];
+            [audioBufferLock unlock];
+            
+            // Schedule buffer for playback
+            scheduleNextBuffer();
+        } else {
+            Log(LOG_E, @"Failed to create audio buffer");
         }
+    }
+}
+
+void scheduleNextBuffer(void) {
+    [audioBufferLock lock];
+    if (audioBufferQueue.count > 0) {
+        AVAudioPCMBuffer* buffer = audioBufferQueue.firstObject;
+        [audioBufferQueue removeObjectAtIndex:0];
+        [audioBufferLock unlock];
+        
+        [playerNode scheduleBuffer:buffer completionHandler:^{
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                scheduleNextBuffer();
+            });
+        }];
+    } else {
+        [audioBufferLock unlock];
     }
 }
 
